@@ -215,14 +215,17 @@ impl CodexContext {
     pub(crate) fn apply_launch_environment(
         &self,
         command: &mut Command,
-        runtime_directory: &Path,
+        runtime_directory: Option<&Path>,
     ) -> Result<()> {
         let path = self
             .environment
             .get(OsStr::new("PATH"))
             .ok_or("Codex binding has no tools path")?;
         let path = std::env::join_paths(
-            std::iter::once(runtime_directory.to_path_buf()).chain(std::env::split_paths(path)),
+            runtime_directory
+                .map(Path::to_path_buf)
+                .into_iter()
+                .chain(std::env::split_paths(path)),
         )
         .map_err(|_| "Invalid Codex runtime tools path")?;
         command

@@ -189,7 +189,9 @@ impl RuntimeBundle {
         let path = tools_path
             .map(|tools_path| {
                 path::compose(
-                    std::iter::once(self.directory.clone())
+                    self.directory()
+                        .map(Path::to_path_buf)
+                        .into_iter()
                         .chain(std::env::split_paths(&tools_path))
                         .chain(
                             environment
@@ -201,7 +203,7 @@ impl RuntimeBundle {
             })
             .transpose()?;
         if let Some(context) = codex {
-            context.apply_launch_environment(&mut command, &self.directory)?;
+            context.apply_launch_environment(&mut command, self.directory())?;
         } else if let (Some(environment), Some(path)) = (environment, path.as_ref()) {
             command.envs(environment).env("PATH", path);
         }

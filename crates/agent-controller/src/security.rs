@@ -204,8 +204,8 @@ impl Controller {
         protected_paths.push(self.ownership_root.clone());
         protected_paths.push(directory.to_path_buf());
         protected_paths.push(controls);
-        if let Ok(bundle) = &self.bundle {
-            protected_paths.push(bundle.directory.clone());
+        if let Some(directory) = self.bundle.as_ref().ok().and_then(|b| b.directory()) {
+            protected_paths.push(directory.to_path_buf());
         }
         protected_paths.push(std::env::current_exe().map_err(|_| "Cannot locate host executable")?);
         let context = json!({"version":2, "providerDirectory":directory,

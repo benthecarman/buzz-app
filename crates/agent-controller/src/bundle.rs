@@ -30,15 +30,40 @@ struct Manifest {
     files: BTreeMap<String, String>,
     goose: GooseSource,
 }
-/// App resource provenance/integrity check, not a defense against a same-user
-/// attacker able to replace the application itself. No PATH/old-app fallback.
+/// Where the agent runtime tools come from.
 pub struct RuntimeBundle {
-    pub(crate) directory: PathBuf,
-    files: BTreeMap<String, String>,
+    tools: Tools,
+}
+enum Tools {
+    /// App resource provenance/integrity check, not a defense against a same-user
+    /// attacker able to replace the application itself. No PATH/old-app fallback.
+    Packaged {
+        directory: PathBuf,
+        files: BTreeMap<String, String>,
+    },
+    /// Tools the user installed, resolved through the login-shell tool PATH at
+    /// each use. Nothing is pinned: these are trusted like the user's own shell.
+    Installed,
 }
 impl RuntimeBundle {
     pub fn new(directory: PathBuf) -> Result<Self> {
         Self::load(directory, verify_signed_resources)
+    }
+
+    /// Uses tools already installed on this machine instead of a packaged
+    /// bundle. A tool that is missing fails only the launches that need it.
+    pub fn installed() -> Self {
+        Self {
+            tools: Tools::Installed,
+        }
+    }
+
+    /// The packaged tool directory, if the tools are packaged.
+    pub(crate) fn directory(&self) -> Option<&Path> {
+        match &self.tools {
+            Tools::Packaged { directory, .. } => Some(directory),
+            Tools::Installed => None,
+        }
     }
 
     fn load(
@@ -77,42 +102,54 @@ impl RuntimeBundle {
         {
             return Err("Runtime target/revision does not match this app".into());
         }
-        let mut bundle = Self {
-            directory,
-            files: manifest.files,
-        };
+        let files = manifest.files;
         let mut observed = BTreeMap::new();
         for name in source.tools {
             let filename = filename(&name);
-            if !bundle.files.contains_key(&filename) {
+            if !files.contains_key(&filename) {
                 return Err("Required runtime tool is absent from the manifest".into());
             }
             observed.insert(
                 filename.clone(),
-                executable_hash(&bundle.directory.join(filename))?,
+                executable_hash(&directory.join(filename))?,
             );
         }
-        if observed != bundle.files {
-            verify_signature(&bundle.directory)?;
+        if observed != files {
+            verify_signature(&directory)?;
         }
         // Keep final bytes in memory so every launch still detects later changes.
-        bundle.files = observed;
-        Ok(bundle)
+        Ok(Self {
+            tools: Tools::Packaged {
+                directory,
+                files: observed,
+            },
+        })
     }
     /// Configured path for display only. Does not inspect files or authorize launch.
     pub(crate) fn display_path(&self, name: &str) -> Option<PathBuf> {
-        let filename = filename(name);
-        self.files
-            .contains_key(&filename)
-            .then(|| self.directory.join(filename))
+        match &self.tools {
+            Tools::Packaged { directory, files } => {
+                let filename = filename(name);
+                files
+                    .contains_key(&filename)
+                    .then(|| directory.join(filename))
+            }
+            Tools::Installed => crate::runtime::installed(name),
+        }
     }
     pub(crate) fn executable(&self, name: &str) -> Result<PathBuf> {
+        let (directory, files) = match &self.tools {
+            Tools::Packaged { directory, files } => (directory, files),
+            Tools::Installed => {
+                return crate::runtime::installed(name)
+                    .ok_or_else(|| format!("{name} is not installed or not on PATH"));
+            }
+        };
         let filename = filename(name);
-        let expected = self
-            .files
+        let expected = files
             .get(&filename)
             .ok_or("Required runtime tool is absent from the manifest")?;
-        let path = self.directory.join(filename);
+        let path = directory.join(filename);
         if executable_hash(&path)? != *expected {
             return Err(INTEGRITY_ERROR.into());
         }
@@ -173,4 +210,20 @@ fn regular_directory(path: &Path) -> Result<()> {
 #[cfg(not(target_os = "macos"))]
 fn verify_signed_resources(_: &Path) -> Result<()> {
     Err(INTEGRITY_ERROR.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeBundle;
+
+    #[test]
+    fn installed_tools_fail_only_the_launch_that_needs_them() {
+        let bundle = RuntimeBundle::installed();
+        assert!(bundle.directory().is_none());
+        assert!(bundle.display_path("buzz-missing-tool").is_none());
+        assert_eq!(
+            bundle.executable("buzz-missing-tool").unwrap_err(),
+            "buzz-missing-tool is not installed or not on PATH"
+        );
+    }
 }
