@@ -167,7 +167,9 @@ impl RuntimeBundle {
             )
         };
         let path = path::compose(
-            std::iter::once(self.directory.clone())
+            self.directory()
+                .map(Path::to_path_buf)
+                .into_iter()
                 .chain(std::env::split_paths(&tools_path))
                 .chain(
                     environment
