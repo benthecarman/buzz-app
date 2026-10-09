@@ -463,9 +463,9 @@ test("Inbox opens the exact thread, shares read state, and fits the workspace", 
   await expect(channelLink).toHaveAttribute("title", "Open full thread");
   await page.keyboard.press("Tab");
   await channelLink.focus();
-  await page.locator("html").evaluate((html) =>
-    html.setAttribute("data-keyboard-navigation", ""),
-  );
+  await page
+    .locator("html")
+    .evaluate((html) => html.setAttribute("data-keyboard-navigation", ""));
   await expect(channelLink).toHaveCSS("outline-offset", "2px");
   const linkBounds = await channelLink.boundingBox();
   const detailBounds = await detail.boundingBox();
