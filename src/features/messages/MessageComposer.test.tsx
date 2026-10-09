@@ -4708,6 +4708,11 @@ for (const channelType of ["stream", "forum"] as const)
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       // block/buzz parity: without permission, Invite is absent, not disabled.
       expect(screen.queryByRole("button", { name: "Invite" })).toBeNull();
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "Send anyway" }),
+        ).toHaveFocus(),
+      );
       expect(screen.getByRole("dialog")).toHaveTextContent(
         "Honey is not in this channel. You cannot add people to this channel. You can still send without inviting them.",
       );
@@ -4767,6 +4772,32 @@ it.each(["Do nothing", "Invite"])(
   },
 );
 
+it("Enter invites a nonmember before sending", async () => {
+  const h = mount();
+  const add = vi.fn(async () => {});
+  const list = {
+    status: "ready",
+    channels: [
+      { id: "channel", channelType: "stream", members: ["d".repeat(64)] },
+    ],
+  };
+  Object.assign(h.session, {
+    viewer: "d".repeat(64),
+    channels: { list: () => list, subscribeList: () => () => {} },
+    memberAdditions: { add },
+  });
+  act(() => h.commands().insertMention(first));
+  fireEvent.submit(screen.getByRole("form"));
+  const invite = screen.getByRole("button", { name: "Invite" });
+  await waitFor(() => expect(invite).toHaveFocus());
+  await userEvent.setup().keyboard("{Enter}");
+  await waitFor(() => expect(h.messages.send).toHaveBeenCalledOnce());
+  expect(add).toHaveBeenCalledWith("channel", first.pubkey, undefined, {
+    startAgent: false,
+  });
+  expect(h.messages.send.mock.calls[0]?.[2]).toEqual([first.pubkey]);
+});
+
 it.each(["close", "escape"])(
   "%s preserves the captured draft and returns focus without adding or sending",
   async (action) => {
@@ -4794,7 +4825,7 @@ it.each(["close", "escape"])(
     );
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Do nothing" })).toHaveFocus(),
+      expect(screen.getByRole("button", { name: "Invite" })).toHaveFocus(),
     );
     if (action === "close")
       fireEvent.click(screen.getByRole("button", { name: "Close" }));
