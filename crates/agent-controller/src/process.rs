@@ -4,7 +4,7 @@
 use crate::Result;
 #[cfg(unix)]
 use std::process::ExitStatus;
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "linux")))]
 use std::process::Stdio;
 use std::process::{Child, Command};
 #[cfg(unix)]
@@ -172,7 +172,42 @@ fn signal_in_session(pid: u32, session: u32, value: i32) -> Result<()> {
     }
     Ok(())
 }
-#[cfg(unix)]
+/// Linux reads `/proc` directly rather than running `ps`, whose location
+/// varies (NixOS has no `/bin/ps`). Only IDs and states are read, as with
+/// `ps`; getsid stays the authority for session membership.
+#[cfg(target_os = "linux")]
+fn session_members(session: u32) -> Result<Vec<u32>> {
+    let entries = std::fs::read_dir("/proc").map_err(|_| "Could not inspect agent descendants")?;
+    let mut members = Vec::new();
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u32>().ok())
+            .filter(|pid| *pid > 1 && *pid <= i32::MAX as u32)
+        else {
+            continue;
+        };
+        // A process that exits meanwhile has no stat file; it is no member.
+        let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+            continue;
+        };
+        // The state follows the parenthesised command name, which may
+        // itself contain spaces or parentheses.
+        let state = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().next());
+        if state == Some("Z") {
+            continue;
+        } // exited; its parent/init owns reaping
+        if unsafe { libc::getsid(pid as i32) } == session as i32 {
+            members.push(pid);
+        }
+    }
+    Ok(members)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
 fn session_members(session: u32) -> Result<Vec<u32>> {
     // ps exposes only IDs/state, never environment or command lines. getsid is
     // the authority, not platform-dependent ps SID formatting (macOS differs).
