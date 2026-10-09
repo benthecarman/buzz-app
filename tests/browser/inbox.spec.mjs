@@ -461,11 +461,11 @@ test("Inbox opens the exact thread, shares read state, and fits the workspace", 
   });
   const channelLink = channelHeading.getByRole("button", { name: "Alpha" });
   await expect(channelLink).toHaveAttribute("title", "Open full thread");
-  await page.evaluate(() =>
-    document.documentElement.setAttribute("data-keyboard-navigation", ""),
-  );
   await page.keyboard.press("Tab");
   await channelLink.focus();
+  await page.locator("html").evaluate((html) =>
+    html.setAttribute("data-keyboard-navigation", ""),
+  );
   await expect(channelLink).toHaveCSS("outline-offset", "2px");
   const linkBounds = await channelLink.boundingBox();
   const detailBounds = await detail.boundingBox();
