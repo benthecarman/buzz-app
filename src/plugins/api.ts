@@ -23,6 +23,8 @@ export type PluginManifest = Readonly<{
       program: string;
       args?: readonly string[];
     }>[];
+    /** Manage plugins through `ctx.host.plugins`. */
+    plugins?: boolean;
   }>;
 }>;
 // Module evaluation must be pure. apply owns resources through ctx.effect.

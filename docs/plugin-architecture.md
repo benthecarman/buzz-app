@@ -533,6 +533,23 @@ SIGKILL three seconds later; the group is always killed once the process exits,
 so descendants do not outlive it. At most 64 processes run at once. Processes
 run with the user's full access and no sandbox; the import preview says so.
 
+A plugin that manages other plugins declares `"plugins": true` under `host`. It
+then uses `ctx.host.plugins`, which offers the operations Settings → Plugins
+uses: `snapshot()`/`subscribe()` for the ready app catalog (every plugin,
+including bundled ones), `importGit(repository, reference?, authorization?)` and
+`discardImport(token)` for a repository preview, `install(token, path)`, and
+`change(action, id)` with `enable`, `disable` or `remove`. Rollback and folder
+reload stay in Settings. Writes go through the same manager as Settings, so only
+one runs at a time: an overlapping write rejects with "Another plugin change is
+in progress". A write resolves after the shared catalog shows its result, and a
+failed write rejects with an `Error`; it does not set the Settings error banner.
+New installs stay turned off, as in Settings. Both share the native process's
+single pending import preview, so a preview opened in one replaces the other's.
+The grant follows the calling plugin's current enabled revision in the catalog.
+Like the other declarations, it supports review rather than isolation. Hosts
+without this capability have no `ctx.host.plugins`, and they reject the manifest
+field at import.
+
 Bundled host grants use the effective compiled manifest at revision `bundled` and
 require the plugin to be enabled in the native catalog. External grants require the
 enabled current artifact and its integrity checks; safe mode pauses external

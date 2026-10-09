@@ -26,6 +26,9 @@ function hostGrants(manifest: PluginManifest): string[] {
       (process) =>
         `Process ${process.id}: ${JSON.stringify([process.program, ...(process.args ?? [])])} and any further arguments · stdin, full user access`,
     ),
+    ...(manifest.host?.plugins
+      ? ["Manage plugins: install, turn on or off, and remove plugins"]
+      : []),
   ];
 }
 

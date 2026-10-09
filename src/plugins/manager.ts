@@ -123,14 +123,16 @@ export function createPluginManager(
       if (!closed) timer = setTimeout(() => void refresh(), 1000);
     }
   }
-  async function update(
+  // Runs one management write. Rejects when another write is in progress or
+  // the write fails; the caller reports the failure.
+  async function perform(
     operation: () => Promise<StorageResult>,
     timeoutMs = 10_000,
   ) {
-    if (busy || closed) return false;
+    if (closed) throw new Error("Plugin management has stopped");
+    if (busy) throw new Error("Another plugin change is in progress");
     busy = true;
     changes++;
-    error = null;
     publish();
     // A watchdog ends the caller's wait, not the underlying native operation.
     let settled = false;
@@ -152,17 +154,29 @@ export function createPluginManager(
         `Plugin storage did not respond within ${timeoutMs / 1000} seconds`,
         timeoutMs,
       );
-      if (!closed) accept(next);
-      return !closed;
+      if (closed) throw new Error("Plugin management has stopped");
+      accept(next);
+    } finally {
+      if (settled) finish();
+      else void pending.then(finish, finish);
+    }
+  }
+  // Settings writes report failure in the shared error banner.
+  async function update(
+    operation: () => Promise<StorageResult>,
+    timeoutMs = 10_000,
+  ) {
+    if (busy || closed) return false;
+    error = null;
+    try {
+      await perform(operation, timeoutMs);
+      return true;
     } catch (reason) {
       if (!closed) {
         error = String(reason);
         publish();
       }
       return false;
-    } finally {
-      if (settled) finish();
-      else void pending.then(finish, finish);
     }
   }
   void refresh();
@@ -176,6 +190,9 @@ export function createPluginManager(
       };
     },
     imports: storage.imports,
+    perform,
+    /** Storage writes for `perform`; they do not update the catalog alone. */
+    changePlugin: storage.changePlugin,
     installImport: (token: string, path: string) =>
       update(() => {
         if (!storage.imports)

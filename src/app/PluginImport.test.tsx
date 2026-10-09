@@ -38,6 +38,7 @@ it("shows exact declared access and changes before an enabled update", async () 
               },
             ],
             networkOrigins: ["https://api.example.com"],
+            plugins: true,
           },
         },
       },
@@ -92,6 +93,9 @@ it("shows exact declared access and changes before an enabled update", async () 
   );
   expect(
     screen.getByText(/HTTPS origin: https:\/\/api.example.com.*new or changed/),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/Manage plugins: install, turn on or off.*new or changed/),
   ).toBeVisible();
   expect(
     screen.getByText(/Removed:.*--brief.*https:\/\/old.example.com/),

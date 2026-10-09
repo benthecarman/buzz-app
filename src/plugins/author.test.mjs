@@ -32,12 +32,13 @@ test("generated author package in a path with spaces exposes agentControl, host,
     await writeFile(
       join(dir, "consumer.ts"),
       `
-import type { Context, AgentControl, Host, PluginManifest, NamingPolicy } from "@buzz/author";
+import type { Context, AgentControl, Host, HostPlugins, PluginInfo, PluginManifest, NamingPolicy } from "@buzz/author";
 export const manifest: PluginManifest = {
   id: "example.plugin", name: "Example", apiVersion: 1,
   host: {
     commands: [{ id: "status", program: "example-cli", args: ["status"], maxOutputBytes: 65536 }],
     networkOrigins: ["https://api.example.com"],
+    plugins: true,
   },
 };
 export const inject = ["agentControl", "host", "identityNames", "pages"];
@@ -58,6 +59,17 @@ export function apply(ctx: Context) {
     headers: { Authorization: "Bearer sample" },
     body: "{}",
   }).then((response) => void response.status);
+  const plugins: HostPlugins | undefined = host.plugins;
+  if (plugins) {
+    const installed: PluginInfo[] = plugins.snapshot().catalog.plugins;
+    void installed;
+    void plugins.importGit("https://example.test/repo.git").then((preview) =>
+      plugins.install(preview.token, preview.candidates[0]?.path ?? ""),
+    );
+    void plugins.change("enable", "example.other");
+    // @ts-expect-error Rollback stays in Settings.
+    void plugins.change("rollback", "example.other");
+  }
   ctx.pages.register({
     id: "main",
     title: "Example",

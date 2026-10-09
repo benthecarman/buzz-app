@@ -2,6 +2,8 @@ import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { Service, type Context } from "@deepseek-ai/cordis";
 import type {} from "../../plugins/api";
 import { nativeIdentityEnabled } from "../identity/service";
+import type { PluginManager } from "../../plugins/manager";
+import type { ImportPreview, StorageResult } from "../../plugins/types";
 
 export type HostRequest = Readonly<{
   url: string;
@@ -46,12 +48,36 @@ export type HostProcess = Readonly<{
 type ProcessEvent =
   | { type: "stdout" | "stderr"; data: string }
   | { type: "exit"; code: number | null };
+export type HostPluginAction = "enable" | "disable" | "remove";
+/**
+ * Plugin management for a plugin whose manifest declares `host.plugins`.
+ * These are the operations Settings › Plugins uses. Writes run one at a time,
+ * shared with Settings; each resolves after the app catalog shows its result.
+ */
+export interface HostPlugins {
+  /** The ready app catalog, with every plugin (bundled ones too). */
+  snapshot(): Extract<StorageResult, { status: "ready" }>;
+  subscribe(listener: () => void): () => void;
+  /** Fetches a Git repository and lists its plugins. Desktop only. */
+  importGit(
+    repository: string,
+    reference?: string,
+    /** A NIP-98 token signed for exactly `repository`. */
+    authorization?: string,
+  ): Promise<ImportPreview>;
+  discardImport(token: string): Promise<void>;
+  /** Installs one plugin from a preview. New plugins stay turned off. */
+  install(token: string, path: string): Promise<void>;
+  change(action: HostPluginAction, id: string): Promise<void>;
+}
 export interface Host {
   runCommand(id: string): Promise<string | null>;
   /** Starts a process the manifest declares in `host.processes`. It lives until
    * it exits, is killed, or the plugin unloads. Desktop only. */
   spawn?: (id: string, options?: HostProcessOptions) => Promise<HostProcess>;
   request(input: HostRequest): Promise<HostResponse>;
+  /** Absent on hosts older than the `host.plugins` declaration. */
+  readonly plugins?: HostPlugins;
   prepareRemoteAgentAuthorization?: (
     agentPubkey: string,
     signal?: AbortSignal,
@@ -64,9 +90,83 @@ declare module "@deepseek-ai/cordis" {
   }
 }
 
+/** Native commands and storage reject with strings; callers expect errors. */
+const asError = (reason: unknown) =>
+  reason instanceof Error ? reason : new Error(String(reason));
+
 export class HostService extends Service implements Host {
-  constructor(context: Context) {
+  constructor(
+    context: Context,
+    private readonly manager?: PluginManager,
+  ) {
     super(context, "host");
+  }
+
+  /** Read through the calling plugin's context, so the grant is its own. */
+  get plugins(): HostPlugins {
+    const manager = this.manager;
+    const owner = this.ctx.pluginOwner;
+    const management = () => {
+      if (!manager || !owner)
+        throw new Error("Plugin management needs an installed plugin");
+      // A plugin runs only from a ready catalog, which also holds its grant.
+      const configuration = manager.snapshot().configuration;
+      if (configuration.status !== "ready")
+        throw new Error("Plugin settings are not ready");
+      const plugin = configuration.catalog.plugins.find(
+        (entry) =>
+          entry.manifest.id === owner.id && entry.revision === owner.revision,
+      );
+      if (!plugin?.enabled || plugin.manifest.host?.plugins !== true)
+        throw new Error("This plugin does not declare host.plugins");
+      return { manager, configuration };
+    };
+    const write = async (
+      operation: (manager: PluginManager) => Promise<void>,
+    ) => {
+      const { manager } = management();
+      await operation(manager).catch((reason: unknown) => {
+        throw asError(reason);
+      });
+    };
+    return Object.freeze({
+      snapshot: () => management().configuration,
+      subscribe: (listener: () => void) =>
+        management().manager.subscribe(listener),
+      async importGit(repository, reference = "", authorization) {
+        const { manager } = management();
+        if (!manager.imports)
+          throw new Error("Plugin imports require the desktop app");
+        const preview = await manager.imports
+          .git(repository, reference, authorization)
+          .catch((reason: unknown) => {
+            throw asError(reason);
+          });
+        if (!preview) throw new Error("No plugin was found in this repository");
+        return preview;
+      },
+      async discardImport(token) {
+        const { manager } = management();
+        await manager.imports?.discard(token).catch((reason: unknown) => {
+          throw asError(reason);
+        });
+      },
+      install: (token, path) =>
+        write((manager) =>
+          manager.perform(() => {
+            if (!manager.imports)
+              throw new Error("Plugin imports require the desktop app");
+            return manager.imports.install(token, path);
+          }),
+        ),
+      change: (action, id) => {
+        if (action !== "enable" && action !== "disable" && action !== "remove")
+          return Promise.reject(new Error("Unknown plugin action"));
+        return write((manager) =>
+          manager.perform(() => manager.changePlugin(action, id)),
+        );
+      },
+    } satisfies HostPlugins);
   }
 
   async prepareRemoteAgentAuthorization(
