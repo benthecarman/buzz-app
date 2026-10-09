@@ -454,6 +454,21 @@ test("Inbox opens the exact thread, shares read state, and fits the workspace", 
   expect(target.messageId).toMatch(/^[a-f0-9]{64}$/);
   await page.getByRole("button", { name: "Go back", exact: true }).click();
   await expect(inbox).toBeVisible();
+  await mentionRow.getByRole("button", { name: /^Open / }).click();
+  const channelHeading = detail.getByRole("heading", { name: "#Alpha" });
+  await channelHeading.getByRole("button", { name: "#Alpha" }).click();
+  await expect(page.getByRole("region", { name: "Channels" })).toBeVisible();
+  const channelTarget = await page.evaluate(
+    () => history.state.buzzNavigationV1.entry.target,
+  );
+  expect(channelTarget).toMatchObject({
+    kind: "conversation",
+    channelId: "alpha",
+  });
+  expect(channelTarget).not.toHaveProperty("messageId");
+  expect(channelTarget).not.toHaveProperty("threadRootId");
+  await page.getByRole("button", { name: "Go back", exact: true }).click();
+  await expect(inbox).toBeVisible();
   await chooseFilter("Mentions");
   // Opening reads; right-click and keyboard still expose local unread.
   const row = mentionRow;

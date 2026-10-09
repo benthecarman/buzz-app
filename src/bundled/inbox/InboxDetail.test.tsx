@@ -283,6 +283,23 @@ async function opened(h: Awaited<ReturnType<typeof fixture>>) {
   expect(row).toHaveFocus();
   return { reader, editor, row };
 }
+it("opens the channel rather than the captured message from the heading", async () => {
+  const h = await fixture();
+  await opened(h);
+  const open = vi.spyOn(navigator, "open");
+  const heading = screen.getByRole("heading", { name: "#Room" });
+  const link = within(heading).getByRole("button", { name: "#Room" });
+  fireEvent.click(link);
+  await waitFor(() =>
+    expect(open).toHaveBeenCalledWith({
+      version: 1,
+      kind: "conversation",
+      scope: h.scope,
+      channelId: "room",
+    }),
+  );
+});
+
 it.each([false, true])(
   "retains the selected reader through reconnect closure (failure: %s), without replaying reveal",
   async (fail) => {
