@@ -283,12 +283,13 @@ async function opened(h: Awaited<ReturnType<typeof fixture>>) {
   expect(row).toHaveFocus();
   return { reader, editor, row };
 }
-it("opens the channel rather than the captured message from the heading", async () => {
+it("opens the captured message from the channel heading", async () => {
   const h = await fixture();
   await opened(h);
   const open = vi.spyOn(navigator, "open");
   const heading = screen.getByRole("heading", { name: "#Room" });
   const link = within(heading).getByRole("button", { name: "#Room" });
+  expect(link).toHaveAttribute("title", "Open full thread");
   fireEvent.click(link);
   await waitFor(() =>
     expect(open).toHaveBeenCalledWith({
@@ -296,6 +297,7 @@ it("opens the channel rather than the captured message from the heading", async 
       kind: "conversation",
       scope: h.scope,
       channelId: "room",
+      messageId: h.root.id,
     }),
   );
 });

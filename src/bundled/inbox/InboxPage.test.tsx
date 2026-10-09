@@ -878,6 +878,12 @@ it("filters real session evidence, opens an exact message and marks it read, and
     await screen.findByRole("region", { name: "Inbox detail" }),
   ).toBeInTheDocument();
   expect(h.open).not.toHaveBeenCalled();
+  expect(
+    within(screen.getByRole("heading", { name: "#Design" })).getByRole(
+      "button",
+      { name: "#Design" },
+    ),
+  ).toHaveAttribute("title", "Open full thread");
   fireEvent.click(screen.getByRole("button", { name: "Open in channel" }));
   await waitFor(() =>
     expect(h.open).toHaveBeenCalledWith({
@@ -1568,6 +1574,12 @@ it("does not accept a second row selection while its explicit read is pending", 
     expect(
       screen.getByRole("heading", { name: "Direct message" }),
     ).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("heading", { name: "DM with Alice" })).getByRole(
+        "button",
+        { name: "DM with Alice" },
+      ),
+    ).toHaveAttribute("title", "Open conversation");
     expect(h.journal()?.state.frontiers[`msg:${h.mention.id}`]).toBeUndefined();
   } finally {
     await act(async () => release());

@@ -456,7 +456,9 @@ test("Inbox opens the exact thread, shares read state, and fits the workspace", 
   await expect(inbox).toBeVisible();
   await mentionRow.getByRole("button", { name: /^Open / }).click();
   const channelHeading = detail.getByRole("heading", { name: "#Alpha" });
-  await channelHeading.getByRole("button", { name: "#Alpha" }).click();
+  const channelLink = channelHeading.getByRole("button", { name: "#Alpha" });
+  await expect(channelLink).toHaveAttribute("title", "Open full thread");
+  await channelLink.click();
   await expect(page.getByRole("region", { name: "Channels" })).toBeVisible();
   const channelTarget = await page.evaluate(
     () => history.state.buzzNavigationV1.entry.target,
@@ -464,9 +466,9 @@ test("Inbox opens the exact thread, shares read state, and fits the workspace", 
   expect(channelTarget).toMatchObject({
     kind: "conversation",
     channelId: "alpha",
+    messageId: target.messageId,
+    threadRootId: expected.id,
   });
-  expect(channelTarget).not.toHaveProperty("messageId");
-  expect(channelTarget).not.toHaveProperty("threadRootId");
   await page.getByRole("button", { name: "Go back", exact: true }).click();
   await expect(inbox).toBeVisible();
   await chooseFilter("Mentions");
