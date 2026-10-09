@@ -462,16 +462,39 @@ test("Inbox opens the exact thread, shares read state, and fits the workspace", 
   const channelLink = channelHeading.getByRole("button", { name: "Alpha" });
   await expect(channelLink).toHaveAttribute("title", "Open full thread");
   await page.keyboard.press("Tab");
-  await channelLink.focus();
-  await page
-    .locator("html")
-    .evaluate((html) => html.setAttribute("data-keyboard-navigation", ""));
-  await expect(channelLink).toHaveCSS("outline-offset", "2px");
-  const linkBounds = await channelLink.boundingBox();
-  const detailBounds = await detail.boundingBox();
-  expect(linkBounds.x).toBeGreaterThanOrEqual(detailBounds.x);
-  expect(linkBounds.x + linkBounds.width).toBeLessThanOrEqual(
-    detailBounds.x + detailBounds.width - 4,
+  const focusRing = await channelLink.evaluate((button) => {
+    document.documentElement.setAttribute("data-keyboard-navigation", "");
+    button.focus();
+    const style = getComputedStyle(button);
+    return {
+      focused: document.activeElement === button,
+      focusVisible: button.matches(":focus-visible"),
+      width: Number.parseFloat(style.outlineWidth),
+      offset: Number.parseFloat(style.outlineOffset),
+      color: style.outlineColor,
+      background: getComputedStyle(button.parentElement).backgroundColor,
+      clipping: getComputedStyle(button.parentElement).overflow,
+      link: button.getBoundingClientRect().toJSON(),
+      heading: button.parentElement.getBoundingClientRect().toJSON(),
+    };
+  });
+  expect(focusRing.focused).toBe(true);
+  expect(focusRing.focusVisible).toBe(true);
+  expect(focusRing.clipping).toBe("hidden");
+  expect(focusRing.width).toBeGreaterThanOrEqual(2);
+  expect(focusRing.color).not.toBe(focusRing.background);
+  const outside = focusRing.width + focusRing.offset;
+  expect(focusRing.link.left - outside).toBeGreaterThanOrEqual(
+    focusRing.heading.left,
+  );
+  expect(focusRing.link.top - outside).toBeGreaterThanOrEqual(
+    focusRing.heading.top,
+  );
+  expect(focusRing.link.right + outside).toBeLessThanOrEqual(
+    focusRing.heading.right,
+  );
+  expect(focusRing.link.bottom + outside).toBeLessThanOrEqual(
+    focusRing.heading.bottom,
   );
   await channelLink.click();
   await expect(page.getByRole("region", { name: "Channels" })).toBeVisible();

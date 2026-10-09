@@ -83,7 +83,7 @@
 
 html[data-keyboard-navigation] .detailHeadingLink:focus-visible {
   outline: 2px solid var(--border-focus);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 /* Share the header row even when larger text makes its controls wrap. */
