@@ -138,6 +138,7 @@ export function AttentionPanel({
 }) {
   const { interests, watches, orphans } = attentionOf(agent.attention);
   const [adding, setAdding] = useState(false);
+  const switched = useAction();
   const skipped = Object.values(agent.skipped);
   const row = (object: WatchObject) => (
     <WatchRow
@@ -160,6 +161,28 @@ export function AttentionPanel({
           icon={<AtIcon size={16} />}
           title="Mentions and replies"
           subtitle="Messages that mention it or reply to it. Always on."
+        />
+        <PreferenceRow
+          icon={<EyeIcon size={16} />}
+          title="Attention"
+          subtitle={
+            <>
+              Lets the agent add and change its own Interests, watches and
+              timers, and wakes it for them. Off, nothing below wakes it, and it
+              is not offered the tools.
+              <Problem error={switched.error} />
+            </>
+          }
+          trailing={
+            <Switch
+              aria-label="Attention on"
+              checked={agent.attentionEnabled}
+              disabled={switched.pending}
+              onCheckedChange={(attentionEnabled) =>
+                void switched.run(() => save({ attentionEnabled }))
+              }
+            />
+          }
         />
       </SettingsGroup>
       {interests.map((object) => {

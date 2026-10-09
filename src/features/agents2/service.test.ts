@@ -60,6 +60,15 @@ function fakeRelay() {
   const statuses = new Set<() => void>();
   const session = {
     archives,
+    // The agent is in `channel`; `private` is the owner's alone.
+    channels: {
+      list: () => ({
+        channels: [
+          { id: channel, name: "general", members: [viewer, bot] },
+          { id: "private", name: "private", members: [viewer] },
+        ],
+      }),
+    },
     live: {
       snapshot: () => ({ status }),
       subscribe(listener: () => void) {
@@ -645,6 +654,11 @@ it("fires a due timer once, then again an interval after it ran", async () => {
   expect(run).toHaveBeenCalledTimes(1);
   await vi.advanceTimersByTimeAsync(60_000);
   expect(run).toHaveBeenCalledTimes(2);
+  // The last allowed occurrence says so, as Janet's final wake does.
+  expect(run.mock.calls.map(([{ trigger }]) => trigger)).toMatchObject([
+    { spent: false },
+    { spent: true },
+  ]);
   await vi.advanceTimersByTimeAsync(120_000);
   expect(run).toHaveBeenCalledTimes(2);
   // Its run state lives in the agent's record and goes when the timer does.
@@ -873,7 +887,7 @@ it("runs once per matching watch, and passes a classifier watch it cannot classi
     expect.objectContaining({ slug: "watch/channel" }),
     expect.objectContaining({
       slug: "watch/classified",
-      classifier: "not run",
+      classifier: { outcome: "not-run", reason: expect.any(String) },
     }),
   ]);
   // Its Interest does not exist, so it arrives without instructions.
@@ -918,6 +932,80 @@ it("keeps DMs and reactions to its own messages away from watches", async () => 
   });
 });
 
+it("wakes a watch only for channels the agent is in, even when it watches all", async () => {
+  const { service, run, emit } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.save(bot, {
+    attention: {
+      "watch/everything": {
+        type: "event",
+        interest_id: "default",
+        enabled: true,
+        since: 1,
+        channels: "all",
+        kinds: [],
+      },
+    },
+  });
+  emit({
+    events: [
+      // The owner's own channel, one whose roster is unknown, and no channel.
+      event("secret", { tags: [["h", "private"]] }),
+      event("unknown", { tags: [["h", "elsewhere"]] }),
+      event("bare", { kind: 1, tags: [] }),
+      event("open"),
+    ],
+  });
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+  await settle();
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(run.mock.calls[0]?.[0].trigger).toMatchObject({
+    slug: "watch/everything",
+    event: { id: "open".padEnd(64, "0") },
+  });
+});
+
+it("drops a queued watch run whose watch was disabled, or whose attention went off, before it ran", async () => {
+  const { service, run, emit } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  let release = () => {};
+  run.mockImplementationOnce(
+    () => new Promise<void>((resolve) => (release = resolve)),
+  );
+  emit({
+    events: [
+      event("one", { content: "deploy" }),
+      event("two", { content: "deploy" }),
+    ],
+  });
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+  const watch = service.find(bot)?.attention["watch/channel"]?.value;
+  await service.save(bot, {
+    attention: { "watch/channel": { ...watch, enabled: false } as never },
+  });
+  release();
+  await settle();
+  expect(run).toHaveBeenCalledTimes(1);
+  // Back on: a run queued before attention went off does not run either.
+  await service.save(bot, {
+    attention: { "watch/channel": { ...watch, enabled: true } as never },
+  });
+  run.mockImplementationOnce(
+    () => new Promise<void>((resolve) => (release = resolve)),
+  );
+  emit({
+    events: [
+      event("three", { content: "deploy" }),
+      event("four", { content: "deploy" }),
+    ],
+  });
+  await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+  await service.save(bot, { attentionEnabled: false });
+  release();
+  await settle();
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
 it("keeps an Interest while a watch still uses it", async () => {
   const { service } = await setup();
   await service.create({ type: "example/echo", name: "Echo" });
@@ -929,4 +1017,121 @@ it("keeps an Interest while a watch still uses it", async () => {
     attention: { "watch/channel": null, "interest/default": null },
   });
   expect(service.find(bot)?.attention).toEqual({});
+});
+
+/** The handle of the agent's next run, from a mention. */
+async function handleOf(
+  run: ReturnType<typeof vi.fn<(delivery: Delivery<Config>) => void>>,
+  emit: (batch: LiveBatch) => void,
+) {
+  emit({
+    events: [
+      event("hi", {
+        tags: [
+          ["h", channel],
+          ["p", bot],
+        ],
+      }),
+    ],
+  });
+  await vi.waitFor(() => expect(run).toHaveBeenCalled());
+  return run.mock.calls.at(-1)?.[0].agent as Delivery["agent"];
+}
+
+it("lets a run read and write its attention with expected-state tokens", async () => {
+  const { service, run, emit } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  const { attention } = await handleOf(run, emit);
+  expect(attention.enabled()).toBe(true);
+  expect(attention.classifier()).toBe("unavailable");
+  expect(attention.interests()).toEqual(["default"]);
+  const shown = await attention.show("interest/default");
+  expect(shown).toMatchObject({
+    result: "found",
+    object: { id: "default", instructions: "Be brief." },
+    expected_state: expect.stringMatching(/^object-v1:[0-9a-f]{64}$/),
+  });
+  const written = await attention.write(
+    "interest/default",
+    { type: "interest", instructions: "Be briefer." },
+    { expected: shown.expected_state },
+  );
+  expect(written.object).toMatchObject({ instructions: "Be briefer." });
+  // The owner sees the agent's write, and the old token no longer works.
+  expect(service.find(bot)?.attention["interest/default"]?.value).toEqual({
+    type: "interest",
+    instructions: "Be briefer.",
+  });
+  await expect(
+    attention.write(
+      "interest/default",
+      { type: "interest", instructions: "Stale." },
+      { expected: shown.expected_state },
+    ),
+  ).rejects.toThrow(/^conflict:/);
+});
+
+it("keeps attention off across a reload", async () => {
+  const { service, storage, native } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.save(bot, { attentionEnabled: false });
+  const reloaded = await setup({
+    storage,
+    identities: await native.list(),
+  });
+  await vi.waitFor(() =>
+    expect(reloaded.service.snapshot().status).toBe("ready"),
+  );
+  expect(reloaded.service.find(bot)?.attentionEnabled).toBe(false);
+});
+
+it("stops watches and timers while attention is off, keeps every object, and resumes them", async () => {
+  vi.useFakeTimers({ now: 1_000_000 });
+  const { service, run, emit } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  await service.save(bot, {
+    attentionEnabled: false,
+    attention: {
+      "watch/tick": {
+        type: "timer",
+        interest_id: "default",
+        prompt: "check in",
+        enabled: true,
+        interval_secs: 60,
+        armed_at: 1_000,
+        max_occurrences: null,
+        expires_at: null,
+      },
+    },
+  });
+  const before = service.find(bot);
+  expect(before?.attentionEnabled).toBe(false);
+  emit({ events: [event("w", { content: "deploy" })] });
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(run).not.toHaveBeenCalled();
+  // Mentions still reach it.
+  emit({
+    events: [
+      event("m", {
+        tags: [
+          ["h", channel],
+          ["p", bot],
+        ],
+      }),
+    ],
+  });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(run.mock.calls.map(([{ trigger }]) => trigger.type)).toEqual([
+    "mention",
+  ]);
+  expect(run.mock.calls[0]?.[0].agent.attention.enabled()).toBe(false);
+  await service.save(bot, { attentionEnabled: true });
+  expect(service.find(bot)?.attention).toEqual(before?.attention);
+  emit({ events: [event("w2", { content: "deploy" })] });
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(run.mock.calls.map(([{ trigger }]) => trigger.type)).toEqual([
+    "mention",
+    "watch",
+    "timer",
+  ]);
 });

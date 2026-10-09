@@ -84,7 +84,7 @@ function setup(thread: readonly EventData[] = []) {
       agent,
       config: DEFAULT_CONFIG,
       signal: new AbortController().signal,
-    } as Delivery);
+    } as unknown as Delivery);
   const claudes = () =>
     fake.processes.filter((process) => process.id === "claude");
   return { runtime, deliver, published, claudes, fake, read, data, agent };

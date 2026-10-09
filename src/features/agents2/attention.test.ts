@@ -94,12 +94,25 @@ describe("validateObject", () => {
       }),
     ).toMatch(/kinds/);
     const question = { question: "q", threshold: 0.5 };
+    // As in Janet, only the question is required.
     expect(
       validateObject("watch/w", {
         ...watch,
-        classifier: { questions: { a: question } },
+        classifier: { questions: { a: { question: "q" } } },
       }),
-    ).toMatch(/Missing field: true/);
+    ).toBeUndefined();
+    expect(
+      validateObject("watch/w", {
+        ...watch,
+        classifier: { questions: { a: {} } },
+      }),
+    ).toMatch(/Missing field: question/);
+    expect(
+      validateObject("watch/w", {
+        ...watch,
+        classifier: { questions: { a: { ...question, threshold: 1 } } },
+      }),
+    ).toMatch(/threshold/);
     expect(
       validateObject("watch/w", {
         ...watch,

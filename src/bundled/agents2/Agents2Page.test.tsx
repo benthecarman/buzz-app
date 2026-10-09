@@ -25,6 +25,7 @@ const agent = (name: string, n: number): Agent => ({
   config: { reply: `${name} says hi` },
   skipped: {},
   timers: {},
+  attentionEnabled: true,
   attention: {
     "interest/default": {
       slug: "interest/default",

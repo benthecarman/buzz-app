@@ -5,12 +5,12 @@
 // relay-backed store can replace this later without changing the record shape.
 import {
   OBJECT_LIMIT,
-  sameSchedule,
   timerState,
   validateObject,
   type AttentionObject,
   type AttentionValue,
   type TimerState,
+  type TimerWatch,
 } from "./attention";
 
 /** An object a reader cannot apply, kept as it was stored so it can be fixed. */
@@ -29,6 +29,10 @@ export type AgentRecord = Readonly<{
   skipped?: Readonly<Record<string, SkippedObject>>;
   /** Plugin-owned config. The host never reads it. */
   config: unknown;
+  /** False when the owner turned attention off: its watches and timers stay
+   * stored but wake nothing, and the agent is not offered attention tools.
+   * Absent means on. */
+  attentionEnabled?: boolean;
   /** Run state of its timers, by slug. Not config, so it never leaves the device;
    * kept here so removing a timer or the agent removes its state with it. */
   timers?: Readonly<Record<string, TimerState>>;
@@ -97,6 +101,7 @@ export function readRecords(storage: Storage): Record<string, AgentRecord> {
       skipped,
       config: record.config,
       timers,
+      ...(record.attentionEnabled === false ? { attentionEnabled: false } : {}),
     };
   }
   return records;
@@ -132,8 +137,11 @@ export function writeRecords(
 }
 
 /** Replaces or deletes (`value: null`) one attention object, after validating it
- * and the count limits. A timer keeps its run state only while its schedule
- * (`armed_at`, `interval_secs`, `enabled`) is unchanged; otherwise it recounts. */
+ * and the count limits. A timer keeps its run state while its `armed_at` is
+ * unchanged, as Janet's do: a new interval applies from its next run, and
+ * enabling it again runs at most one overdue occurrence. A new `armed_at` (a
+ * rearm) sets a new deadline, one interval after it, and keeps the occurrences
+ * already used. Only a timer with no saved state counts what was already due. */
 export function setAttention(
   record: AgentRecord,
   slug: string,
@@ -159,8 +167,8 @@ export function setAttention(
       ? {
           ...timers,
           [slug]:
-            state && prior?.type === "timer" && sameSchedule(prior, value)
-              ? state
+            state && prior?.type === "timer"
+              ? rearmed(value, state)
               : timerState(value, undefined, now),
         }
       : timers;
@@ -169,5 +177,15 @@ export function setAttention(
     attention: { ...rest, [slug]: { slug, value, modifiedAt: now } },
     skipped,
     timers: kept,
+  };
+}
+
+/** `state` for the edited `timer`: unchanged unless it was rearmed. */
+function rearmed(timer: TimerWatch, state: TimerState): TimerState {
+  if (state.armedAt === timer.armed_at) return state;
+  return {
+    armedAt: timer.armed_at,
+    nextDue: timer.armed_at + timer.interval_secs,
+    used: state.used,
   };
 }

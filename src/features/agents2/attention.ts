@@ -12,8 +12,12 @@ export type ClassifierQuestion = Readonly<{
   true?: string;
   false?: string;
   guidance?: string;
-  threshold: number;
+  /** The yes probability at which the answer passes; CLASSIFIER_THRESHOLD
+   * when absent. */
+  threshold?: number;
 }>;
+/** Janet's default: a lower threshold passes more events. */
+export const CLASSIFIER_THRESHOLD = 0.2;
 export type EventWatch = Readonly<{
   type: "event";
   interest_id: string;
@@ -176,7 +180,7 @@ function eventWatch(value: Record<string, unknown>) {
         fail(`Invalid question name: ${name}`);
       if (!isObject(question)) fail(`Question ${name} must be an object`);
       const q = question as Record<string, unknown>;
-      fields(q, ["question", "true", "false", "threshold"], ["guidance"]);
+      fields(q, ["question"], ["true", "false", "guidance", "threshold"]);
       for (const [key, max] of [
         ["question", 2_048],
         ["true", 4_096],
@@ -185,8 +189,9 @@ function eventWatch(value: Record<string, unknown>) {
       ] as const)
         if (q[key] !== undefined) total += bytes(text(q[key], key, max));
       if (
-        typeof q.threshold !== "number" ||
-        !(q.threshold > 0 && q.threshold < 1)
+        q.threshold !== undefined &&
+        (typeof q.threshold !== "number" ||
+          !(q.threshold > 0 && q.threshold < 1))
       )
         fail("threshold must be between 0 and 1");
     }
@@ -410,11 +415,6 @@ export function timerState(
     used,
   };
 }
-/** Edits to these restart the count; the rest keep the saved state. */
-export const sameSchedule = (a: TimerWatch, b: TimerWatch) =>
-  a.armed_at === b.armed_at &&
-  a.interval_secs === b.interval_secs &&
-  a.enabled === b.enabled;
 export function timerSpent(timer: TimerWatch, state: TimerState, now: number) {
   return (
     (timer.expires_at !== null && now >= timer.expires_at) ||

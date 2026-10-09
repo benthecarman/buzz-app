@@ -1,9 +1,9 @@
 // Agents2: agents that are plugins from the start. A plugin registers an agent
 // type (its summary line, peek view, settings tabs and `run`); each agent made
 // from it has its own native-held key, an `agent-attention/v1` configuration the
-// app owns and edits, and a config blob the type owns. The app delivers matching live events to
-// `run` from the stream the owner already receives, so no plugin opens a socket
-// or a REQ.
+// app owns and the agent edits through its handle, and a config blob the type
+// owns. The app delivers matching live events to `run` from the stream the owner
+// already receives, so no plugin opens a socket or a REQ.
 import { Service, type Context } from "@deepseek-ai/cordis";
 import type { ComponentType } from "react";
 import {
@@ -34,6 +34,18 @@ import {
   type TimerWatch,
 } from "./attention";
 import {
+  AttentionError,
+  checkedWrite,
+  interestIds,
+  show,
+  watchSummaries,
+  type ClassifierAvailability,
+  type Shown,
+  type WatchFilter,
+  type WatchSummary,
+  type WriteOptions,
+} from "./attention-objects";
+import {
   nativeAgents,
   type AgentEventTemplate,
   type AgentIdentity,
@@ -61,11 +73,14 @@ export type Agent<Config = unknown> = Readonly<{
   skipped: Readonly<Record<string, SkippedObject>>;
   /** Run state of its timers, by slug; written only by the runtime. */
   timers: Readonly<Record<string, TimerState>>;
+  /** Whether its watches and timers wake it. Off keeps every object. */
+  attentionEnabled: boolean;
   config: Config;
 }>;
 export type AgentChange<Config = unknown> = Readonly<{
   name?: string;
   config?: Config;
+  attentionEnabled?: boolean;
   /** Slug to new value; `null` deletes the object. */
   attention?: Readonly<Record<string, AttentionValue | null>>;
 }>;
@@ -97,6 +112,36 @@ export type AgentHandle = Readonly<{
   /** Writes memory entry `slug`, newer than the entry it replaces (`after`,
    * that entry's `createdAt`, or 0). The owner reads it back. */
   remember(slug: string, body: string, after: number): Promise<RelayEvent>;
+  /** The agent's own attention, one object at a time. */
+  attention: AgentAttention;
+}>;
+/** What an agent reads and writes of its attention. Every read is current,
+ * so a long run sees the owner's switch and the classifier's state change. */
+export type AgentAttention = Readonly<{
+  /** False when the owner turned attention off: none of its objects wakes the
+   * agent. The handle still reads and writes them; the attention tools refuse
+   * every call while it is off. */
+  enabled(): boolean;
+  /** Whether a watch's classifier can run now. Classifiers can be saved
+   * either way; one that cannot run lets every event pass. */
+  classifier(): ClassifierAvailability;
+  /** One object and its expected-state token. `interest` scopes the read:
+   * an object of another Interest is `wrong-scope`. */
+  show(slug: string, interest?: string): Promise<Shown>;
+  interests(search?: string): readonly string[];
+  watches(filter?: WatchFilter): readonly WatchSummary[];
+  /** Replaces, or with `null` removes, one object; returns it as shown after
+   * the write. Throws an AttentionError when refused. */
+  write(
+    slug: string,
+    value: AttentionValue | null,
+    options: WriteOptions,
+  ): Promise<Shown>;
+}>;
+/** Why a classified watch's event passed without a classifier answer. */
+export type ClassifierSkip = Readonly<{
+  outcome: "not-run";
+  reason: string;
 }>;
 export type Trigger =
   /** Directly addressed: a chat message that mentions the agent or replies to
@@ -110,9 +155,10 @@ export type Trigger =
       watch: EventWatch;
       /** Absent when the watch names an Interest that does not exist. */
       interest?: Interest;
-      /** Set when the watch has a classifier this app could not run. The spec
-       * passes the event rather than lose a match to an unavailable model. */
-      classifier?: "not run";
+      /** Set when the watch has a classifier that did not run. The event
+       * passes rather than lose a match to an unavailable model, and the
+       * agent is told why. */
+      classifier?: ClassifierSkip;
     }>
   | Readonly<{
       type: "timer";
@@ -120,6 +166,8 @@ export type Trigger =
       timer: TimerWatch;
       /** Absent when the timer names an Interest that does not exist. */
       interest?: Interest;
+      /** This is its last allowed occurrence. */
+      spent: boolean;
     }>;
 export type Delivery<Config = unknown> = Readonly<{
   trigger: Trigger;
@@ -200,6 +248,12 @@ function defaults(pubkey: string, type: RegisteredAgentType) {
     record = setAttention(record, slug, value);
   return record;
 }
+/** Until a classifier is wired in, every classified watch passes unchecked. */
+const UNAVAILABLE: ClassifierSkip = Object.freeze({
+  outcome: "not-run",
+  reason: "no classifier is available on this device",
+});
+const seconds = () => Math.floor(Date.now() / 1000);
 const message = (error: unknown) =>
   String(error instanceof Error ? error.message : error);
 const bounded = (set: Set<string>, id: string) => {
@@ -335,6 +389,8 @@ export class Agents2Service extends Service implements Agents2 {
   };
   find = (pubkey: string) =>
     this.state.agents.find((agent) => agent.pubkey === pubkey);
+  /** Whether watch classifiers can run on this device. */
+  private classifier = (): ClassifierAvailability => "unavailable";
 
   async create({ type, name }: Readonly<{ type: string; name: string }>) {
     const native = this.native;
@@ -371,6 +427,12 @@ export class Agents2Service extends Service implements Agents2 {
     let record = this.recordOf(identity);
     if (change.config !== undefined)
       record = { ...record, config: change.config };
+    if (change.attentionEnabled !== undefined) {
+      const { attentionEnabled: _, ...rest } = record;
+      record = change.attentionEnabled
+        ? rest
+        : { ...rest, attentionEnabled: false };
+    }
     for (const [slug, value] of Object.entries(change.attention ?? {}))
       record = setAttention(record, slug, value);
     // As the spec's writer: an Interest stays while anything still uses it.
@@ -387,7 +449,12 @@ export class Agents2Service extends Service implements Agents2 {
           "Remove or move the watches and timers that use this Interest first",
         );
     }
-    if (change.config !== undefined || change.attention) this.write(record);
+    if (
+      change.config !== undefined ||
+      change.attention ||
+      change.attentionEnabled !== undefined
+    )
+      this.write(record);
     if (name !== undefined && name !== identity.name) {
       await this.native.rename(pubkey, name);
       // Shows the new name and publishes it as the agent's profile.
@@ -436,6 +503,7 @@ export class Agents2Service extends Service implements Agents2 {
       attention: record.attention,
       skipped: record.skipped ?? EMPTY,
       timers: record.timers ?? EMPTY,
+      attentionEnabled: record.attentionEnabled !== false,
       config: record.config,
     });
   }
@@ -616,6 +684,7 @@ export class Agents2Service extends Service implements Agents2 {
           prior.attention === record.attention &&
           prior.skipped === (record.skipped ?? EMPTY) &&
           prior.timers === (record.timers ?? EMPTY) &&
+          prior.attentionEnabled === (record.attentionEnabled !== false) &&
           prior.config === record.config
           ? prior
           : this.view(identity, record),
@@ -691,7 +760,9 @@ export class Agents2Service extends Service implements Agents2 {
         watch,
         ...(interest?.type === "interest" ? { interest } : {}),
         // No classifier model runs here yet, so the event passes unclassified.
-        ...(watch.classifier ? { classifier: "not run" as const } : {}),
+        ...(watch.classifier && this.classifier() === "unavailable"
+          ? { classifier: UNAVAILABLE }
+          : {}),
         ...(watch.filter ? { filter: compileFilter(watch.filter) } : {}),
       });
     }
@@ -740,9 +811,42 @@ export class Agents2Service extends Service implements Agents2 {
       return CHAT_KINDS.includes(event.kind)
         ? [{ type: "mention", event }]
         : [];
+    if (!agent.attentionEnabled || !this.member(agent, event)) return [];
     return this.watches(runner, agent)
       .filter(({ watch, filter }) => watchMatches(watch, event, filter))
       .map(({ filter: _, ...match }) => ({ type: "watch", event, ...match }));
+  }
+  /** Whether the agent is in the event's channel, by its relay-signed roster.
+   * The stream is the owner's, so a watch, even of "all", sees only what the
+   * agent itself could read; an event with no channel, or whose roster is
+   * unknown, wakes no watch. */
+  private member(agent: Agent, event: RelayEvent) {
+    const channel = event.tags.find((tag) => tag[0] === "h")?.[1];
+    const channels = this.binding?.session.channels;
+    if (!channel || !channels) return false;
+    const summary =
+      channels.list().channels.find((item) => item.id === channel) ??
+      channels.get?.(channel);
+    return !!summary?.members?.includes(agent.pubkey);
+  }
+  /** The job as it should run now, or undefined when it should not run: a
+   * watch's event is matched again against the agent's current attention, so
+   * one turned off, disabled, removed or changed since it was queued wakes
+   * nothing. */
+  private current(runner: Runner, agent: Agent, job: Job): Job | undefined {
+    const { trigger } = job;
+    if (trigger.type !== "watch") return job;
+    if (!agent.attentionEnabled) return undefined;
+    const match = this.watches(runner, agent).find(
+      ({ slug, watch, filter }) =>
+        slug === trigger.slug && watchMatches(watch, trigger.event, filter),
+    );
+    if (!match) return undefined;
+    const { filter: _, ...rest } = match;
+    return {
+      ...job,
+      trigger: { type: "watch", event: trigger.event, ...rest },
+    };
   }
 
   // Spec schedule rules: occurrence k is due at armed_at + k × interval, at most one
@@ -752,7 +856,9 @@ export class Agents2Service extends Service implements Agents2 {
   // disabled or expired meanwhile never runs. The longest-waiting timer runs first,
   // so one whose runs outlast its interval cannot hold back the others.
   private dueTimer(agent: Agent): Job | undefined {
-    const now = Math.floor(Date.now() / 1000);
+    // Off, timers keep their saved state; one overdue runs once when back on.
+    if (!agent.attentionEnabled) return undefined;
+    const now = seconds();
     const record = this.records[agent.pubkey] ?? blank(agent.pubkey);
     const prior = record.timers ?? EMPTY;
     let timers = prior;
@@ -769,15 +875,12 @@ export class Agents2Service extends Service implements Agents2 {
       if (!next || state.nextDue < next.state.nextDue)
         next = { slug: object.slug, timer, state };
     }
-    if (next)
-      timers = {
-        ...timers,
-        [next.slug]: {
-          ...next.state,
-          used: next.state.used + 1,
-          nextDue: now + next.timer.interval_secs,
-        },
-      };
+    const ran = next && {
+      ...next.state,
+      used: next.state.used + 1,
+      nextDue: now + next.timer.interval_secs,
+    };
+    if (next && ran) timers = { ...timers, [next.slug]: ran };
     if (timers !== prior)
       try {
         this.write({ ...record, timers });
@@ -786,7 +889,7 @@ export class Agents2Service extends Service implements Agents2 {
         console.warn(`Agent ${agent.name} timer state was not saved`, error);
         return undefined;
       }
-    if (!next) return undefined;
+    if (!next || !ran) return undefined;
     const { slug, timer } = next;
     const interest = agent.attention[`interest/${timer.interest_id}`]?.value;
     return {
@@ -795,6 +898,7 @@ export class Agents2Service extends Service implements Agents2 {
         slug,
         timer,
         ...(interest?.type === "interest" ? { interest } : {}),
+        spent: timerSpent(timer, ran, ran.nextDue),
       },
     };
   }
@@ -832,7 +936,11 @@ export class Agents2Service extends Service implements Agents2 {
         runner.queue.length = 0;
         break;
       }
-      const job = runner.queue.shift() ?? this.dueTimer(agent);
+      const queued = runner.queue.shift();
+      const job = queued
+        ? this.current(runner, agent, queued)
+        : this.dueTimer(agent);
+      if (queued && !job) continue;
       if (!job) break;
       const lifetime = runner.controller.signal;
       const signal = AbortSignal.any([
@@ -850,6 +958,7 @@ export class Agents2Service extends Service implements Agents2 {
           this.require().upload(agent.pubkey, data, mime),
         remember: (slug: string, body: string, after: number) =>
           this.require().remember(agent.pubkey, slug, body, after),
+        attention: this.attention(agent.pubkey),
       });
       try {
         await Promise.race([
@@ -877,6 +986,52 @@ export class Agents2Service extends Service implements Agents2 {
       }
     }
     runner.running = false;
+  }
+
+  /** The agent's attention as its handle offers it. Reads the saved record
+   * each call, so it is current however long the run lasts. */
+  private attention(pubkey: string): AgentAttention {
+    const record = () => {
+      const identity = this.live(pubkey);
+      if (!identity) throw new Error("No such agent on this device");
+      return this.recordOf(identity);
+    };
+    return Object.freeze({
+      enabled: () => record().attentionEnabled !== false,
+      classifier: () => this.classifier(),
+      show: (slug: string, interest?: string) =>
+        show(record(), slug, seconds(), interest),
+      interests: (search?: string) => interestIds(record(), search),
+      watches: (filter: WatchFilter = {}) =>
+        watchSummaries(record(), filter, seconds()),
+      write: async (
+        slug: string,
+        value: AttentionValue | null,
+        options: WriteOptions,
+      ) => {
+        // The token is checked against the record as it is when the write
+        // lands: a write that raced this one makes it check again, a few times.
+        for (let attempt = 0; ; attempt++) {
+          const before = record();
+          const after = await checkedWrite(
+            before,
+            slug,
+            value,
+            options,
+            seconds(),
+          );
+          if (record() !== before) {
+            if (attempt < 3) continue;
+            throw new AttentionError(
+              "conflict",
+              `${slug} is changing; show it again`,
+            );
+          }
+          this.write(after);
+          return show(after, slug, seconds());
+        }
+      },
+    });
   }
 
   private require() {
