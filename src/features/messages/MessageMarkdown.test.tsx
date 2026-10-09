@@ -192,9 +192,20 @@ second
     expect(block).toContain(
       "<p>&lt;div onclick=&quot;x()&quot;&gt;<br/>\n**not bold** :party:<br/>\n&lt;/div&gt;</p>",
     );
-    expect(block).toContain("<p>&lt;!-- note --&gt;</p>");
+    expect(block).not.toContain("note");
     expect(block).not.toContain("<div onclick");
     expect(block).not.toContain("<strong>");
+  });
+
+  it("hides complete HTML comments, such as Buzz Desktop's wave marker", () => {
+    const wave = render("<!-- buzz:wave:v1 -->\nLogan waved at you.");
+    expect(wave).toContain("<p>Logan waved at you.</p>");
+    expect(wave).not.toContain("buzz:wave");
+    expect(render("a <!-- hidden --> b")).toContain("<p>a  b</p>");
+    expect(render("<!-- x --> <harness>")).toContain("<p> &lt;harness&gt;</p>");
+    expect(render("an <!-- unclosed comment")).toContain(
+      "<p>an &lt;!-- unclosed comment</p>",
+    );
   });
 
   it("allows credential-free HTTP(S) links and makes other destinations non-clickable", () => {

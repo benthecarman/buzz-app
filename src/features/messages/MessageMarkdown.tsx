@@ -35,7 +35,7 @@ import type { ConversationExtensions } from "../conversation/contracts";
 import { InlineText } from "../conversation/InlineText";
 import type { ChannelMessage, Profile } from "../relay/contracts";
 import { emojiMatches, linkPart, messageParts } from "../relay/emoji";
-import { safeLinkUrl } from "../relay/message-content";
+import { safeLinkUrl, visibleHtmlSource } from "../relay/message-content";
 import styles from "./Messages.module.css";
 import { profileMentionParts } from "./profile-mentions";
 import {
@@ -248,8 +248,9 @@ const phrasingParents = new Set([
 
 /** Chat never renders raw HTML, but `<harness>` is still something the author
  * typed. Show the exact source as text, with chat line breaks, instead of
- * dropping it. Run last: the source is literal, so no mention, emoji or
- * autolink processing applies. */
+ * dropping it. Complete HTML comments stay hidden (`visibleHtmlSource`).
+ * Run last: the source is literal, so no mention, emoji or autolink
+ * processing applies. */
 function remarkLiteralHtml() {
   const literal = (value: string): MarkdownNode[] =>
     value
@@ -266,7 +267,9 @@ function remarkLiteralHtml() {
           visit(child);
           return [child];
         }
-        const text = literal(child.value ?? "");
+        const source = visibleHtmlSource(child.value ?? "");
+        if (!source.trim()) return [];
+        const text = literal(source);
         return phrasingParents.has(parent.type)
           ? text
           : [

@@ -63,6 +63,10 @@ it("bounds source, Unicode output and nesting, with a nonempty fallback", () => 
   expect(messagePreview("<harness stuff goes here>")).toBe(
     "<harness stuff goes here>",
   );
+  expect(messagePreview("<!-- buzz:wave:v1 -->\nLogan waved at you.")).toBe(
+    "Logan waved at you.",
+  );
+  expect(messagePreview("<!-- buzz:wave:v1 -->")).toBe("New message");
 });
 it("normalizes whitespace/control characters in names and body", () => {
   const text = messageNotificationText(

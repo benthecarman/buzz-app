@@ -40,6 +40,14 @@ type MarkdownScan = {
   links: MarkdownNode[];
 };
 
+/** Raw HTML in chat is shown as the typed text, except complete HTML
+ * comments. Comments are hidden markup by Markdown convention, and clients
+ * put protocol markers in them (Buzz Desktop waves start with
+ * `<!-- buzz:wave:v1 -->`). An unclosed `<!--` stays visible. */
+export function visibleHtmlSource(value: string): string {
+  return value.replace(/<!--[\s\S]*?-->/g, "");
+}
+
 export const MAX_ATTACHMENT_NAME_LENGTH = 256;
 export const RELAY_HASH_BASENAME = /^[0-9a-f]{64}(?:\.[^./?#]+)?$/i;
 

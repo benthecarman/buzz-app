@@ -1,7 +1,7 @@
 import { workflowLabel } from "../relay/workflow-attribution";
 import type { ChannelSummary, Profile } from "../relay/contracts";
 import type { IncomingMessage } from "../relay/incoming";
-import { scanMarkdown } from "../relay/message-content";
+import { scanMarkdown, visibleHtmlSource } from "../relay/message-content";
 import type { NotificationCategory } from "./preferences";
 
 export type NotificationText = Readonly<{ title: string; body: string }>;
@@ -26,6 +26,7 @@ function shortText(value: string, limit: number) {
 type TextNode = { type: string; value?: string; children?: TextNode[] };
 function prose(node: TextNode): string {
   if (node.type === "definition") return "";
+  if (node.type === "html") return visibleHtmlSource(node.value ?? "");
   if (node.type === "image" || node.type === "imageReference") return "[Image]";
   if (node.type === "break" || node.type === "thematicBreak") return " ";
   if (node.value !== undefined) return node.value;
