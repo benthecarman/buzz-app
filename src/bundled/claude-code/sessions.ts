@@ -2,7 +2,8 @@
 // each continuing across messages and app restarts. A conversation in use keeps
 // its process; a quiet one is stopped and resumed from its saved session when it
 // is next addressed. A spare process waits for the next new conversation, so
-// that starts without a spawn.
+// that starts without a spawn. A one-off turn (a watch or timer wake) gets a
+// new session of its own, which is never saved, resumed or shared.
 import {
   ClaudeProcess,
   type ClaudeLaunch,
@@ -14,6 +15,10 @@ import {
 export const MAX_LIVE = 6;
 /** A conversation's process stops after this long without a message. */
 export const IDLE_MS = 15 * 60_000;
+/** How long a one-off turn waits for a free process, and then how long it
+ * can run, before it is given up; Janet's turn deadline. */
+export const ONCE_DEADLINE_MS = 5 * 60_000;
+const ROOM_POLL_MS = 1_000;
 /** Saved sessions per agent; the least recently used are forgotten. */
 const SAVED_LIMIT = 200;
 
@@ -52,6 +57,10 @@ type Live = {
 
 export class AgentSessions {
   private readonly live = new Map<string, Live>();
+  /** One-off turns running or starting, by label. They count toward
+   * MAX_LIVE, and are never stopped to make room. */
+  private readonly once = new Map<string, Live | undefined>();
+  private onceCount = 0;
   private readonly opening = new Map<string, Promise<Live | undefined>>();
   private spare: Promise<Live | undefined> | undefined;
   private disposed = false;
@@ -69,10 +78,13 @@ export class AgentSessions {
   }
   /** Conversations with a running process, and whether each is working. */
   snapshot() {
-    return [...this.live].map(([key, live]) => ({
-      key,
-      busy: live.process.busy,
-    }));
+    return [
+      ...[...this.live].map(([key, live]) => ({
+        key,
+        busy: live.process.busy,
+      })),
+      ...[...this.once.keys()].map((key) => ({ key, busy: true })),
+    ];
   }
 
   /** Starts a spare process unless one exists or the agent is at its limit. */
@@ -158,6 +170,66 @@ export class AgentSessions {
     return delivered;
   }
 
+  /** Runs `text` as one turn in a new session, then stops its process. The
+   * session is not saved, so it never displaces a conversation's saved
+   * session and is never resumed. `label` names it in the snapshot. When every
+   * process is busy it waits for one, as Janet retries a busy wake; it gives
+   * up, and stops the turn, after `deadline` ms of waiting or of running. */
+  async runOnce(
+    label: string,
+    text: string,
+    deadline = ONCE_DEADLINE_MS,
+  ): Promise<Settled> {
+    const until = Date.now() + deadline;
+    // Take the spare's place, or reserve room, before anything is awaited.
+    while (!this.disposed && !this.spare && !this.room()) {
+      if (Date.now() >= until)
+        return {
+          ok: false,
+          error: `Claude Code was running ${MAX_LIVE} sessions for ${Math.round(deadline / 1000)}s; this turn was given up`,
+        };
+      await new Promise((resolve) => setTimeout(resolve, ROOM_POLL_MS));
+    }
+    if (this.disposed) return { ok: false, error: "Claude Code was stopped" };
+    const key = `${label} #${++this.onceCount}`;
+    this.once.set(key, undefined);
+    const spare = this.spare ? this.claimSpare() : undefined;
+    // The spare is taken: start the next one now, not when this turn ends.
+    this.warm();
+    this.options.onChange?.();
+    let live: Live | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      live = (await spare) ?? (await this.start(undefined));
+      if (this.disposed) return { ok: false, error: "Claude Code was stopped" };
+      // A key no conversation uses: its tools have no default destination.
+      live.process.conversation = key;
+      this.once.set(key, live);
+      return await Promise.race([
+        live.process.send(text),
+        new Promise<Settled>((resolve) => {
+          timer = setTimeout(
+            () =>
+              resolve({
+                ok: false,
+                error: `The turn ran past its ${Math.round(deadline / 1000)}s deadline and was stopped`,
+              }),
+            deadline,
+          );
+        }),
+      ]);
+    } catch (error) {
+      console.warn("Claude Code could not start a one-off session", error);
+      return { ok: false, error: "Claude Code could not start" };
+    } finally {
+      clearTimeout(timer);
+      this.once.delete(key);
+      void live?.process.kill();
+      this.options.onChange?.();
+      this.warm();
+    }
+  }
+
   /** Stops idle processes started with old settings and replaces the spare;
    * busy ones stop when they next fall idle. */
   reconfigure() {
@@ -174,6 +246,7 @@ export class AgentSessions {
   dispose() {
     this.disposed = true;
     for (const [key, live] of this.live) this.drop(key, live);
+    for (const live of this.once.values()) void live?.process.kill();
     void this.spare?.then((live) => live?.process.kill());
     this.spare = undefined;
   }
@@ -242,7 +315,9 @@ export class AgentSessions {
   }
   /** Processes running or starting, the spare included. */
   private count() {
-    return this.live.size + this.opening.size + (this.spare ? 1 : 0);
+    return (
+      this.live.size + this.opening.size + this.once.size + (this.spare ? 1 : 0)
+    );
   }
   /** Makes room for one more process by stopping the longest-idle
    * conversation, else the spare. False when every process is working. */

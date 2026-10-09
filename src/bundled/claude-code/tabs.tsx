@@ -224,7 +224,7 @@ export function createTabs({
           description={
             draft.respondTo === "anyone"
               ? "Claude runs commands on this computer as you, with no approval step. Anyone who can mention it can ask it to."
-              : "Messages from anyone else are ignored."
+              : "Mentions from anyone else are ignored. Its watches still read what anyone posts in the channels they watch, as data."
           }
           onValueChange={(value) =>
             setDraft({

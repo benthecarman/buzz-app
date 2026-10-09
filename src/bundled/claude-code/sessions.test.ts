@@ -182,6 +182,36 @@ it("says it is busy rather than start a process past its limit", async () => {
   );
 });
 
+it("holds a one-off turn until a process is free, and gives up at its deadline", async () => {
+  vi.useFakeTimers();
+  const { pool, live, claudes } = sessions({ hold: true });
+  for (let index = 0; index < MAX_LIVE; index++)
+    void pool.deliver(`c/${index}`, "hi", index);
+  await vi.advanceTimersByTimeAsync(10);
+  expect(live()).toHaveLength(MAX_LIVE);
+  let settled = false;
+  const waiting = pool.runOnce("timer/a", "wake").then((result) => {
+    settled = true;
+    return result;
+  });
+  await vi.advanceTimersByTimeAsync(5_000);
+  expect(settled).toBe(false);
+  // One conversation finishes; the turn takes its room at once.
+  claudes()[0]?.finish();
+  await vi.advanceTimersByTimeAsync(2_000);
+  expect(claudes().some((process) => process.prompts.includes("wake"))).toBe(
+    true,
+  );
+  // A turn that never gets room is given up, not run late.
+  const late = pool.runOnce("timer/b", "late", 3_000);
+  await vi.advanceTimersByTimeAsync(4_000);
+  await expect(late).resolves.toMatchObject({ ok: false });
+  expect(claudes().some((process) => process.prompts.includes("late"))).toBe(
+    false,
+  );
+  void waiting;
+});
+
 it("counts conversations still starting toward its limit", async () => {
   let release!: () => void;
   const launched = new Promise<void>((resolve) => {

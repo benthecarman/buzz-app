@@ -106,7 +106,6 @@ it("includes the thread messages the session has not seen", () => {
     total: 3,
     label: "@mention",
     name,
-    interest: "Fix builds.",
   });
   expect(prompt).toContain(`Thread root: ${root.id}\nParent: ${earlier.id}`);
   expect(prompt).toContain(
@@ -122,7 +121,7 @@ it("includes the thread messages the session has not seen", () => {
     `[2] ${bob} (2027-01-15T08:00:10.000Z): It fails on main`,
   );
   expect(prompt).toContain(`Parsed: parent=${earlier.id}, root=${root.id}`);
-  expect(prompt).toMatch(/<interest>\nFix builds.\n<\/interest>$/);
+  expect(prompt).toMatch(/<\/buzz-event>$/);
 });
 
 it("says earlier context is already in the session when none is new", () => {
@@ -163,11 +162,29 @@ it("wraps a message that arrives mid-turn and frames a timer", () => {
     /^<new-message-arrived-while-you-were-working>\n<buzz-event>x<\/buzz-event>\n<\/new-message-arrived-while-you-were-working>\n\nNote: A new message arrived/,
   );
   const timer = timerPrompt({
-    slug: "watch/daily",
+    id: "daily",
+    interest: "ops",
     prompt: "Summarize",
     instructions: "Be brief",
+    spent: false,
   });
-  expect(timer).toContain("Timer: watch/daily");
+  expect(timer).toContain("Timer: daily");
   expect(timer).toContain("Prompt: Summarize");
-  expect(timer).toContain("<interest>\nBe brief\n</interest>");
+  expect(timer).not.toContain("spent: true");
+  expect(timer).toContain('<interest id="ops">\nBe brief\n</interest>');
+  // A timer whose Interest is gone says so, rather than running without one.
+  expect(
+    timerPrompt({ id: "daily", interest: "o<p", prompt: "x", spent: true }),
+  ).toContain(
+    '<interest id="o&lt;p" missing="true">\nThis timer names Interest "o&lt;p", which does not exist.',
+  );
+});
+
+it("adds attention guidance only for a session with attention tools", () => {
+  expect(
+    systemPrompt({ scope: "thread", cwd: "/w", attention: true }),
+  ).toContain("## Attention");
+  expect(systemPrompt({ scope: "thread", cwd: "/w" })).not.toContain(
+    "## Attention",
+  );
 });
