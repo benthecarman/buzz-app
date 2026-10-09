@@ -127,29 +127,26 @@ impl AppAgentHost {
 
 /// Which running copy of the app runs each agent. Every copy on this machine
 /// (the packaged app and any dev builds) shares the agent list and hears the
-/// same events, so each agent is run by the one copy holding its lock file. The
-/// OS lets go when that copy exits, however it exits.
+/// same events. The packaged app always runs what it can and holds
+/// `<pubkey>.packaged` while it does; there is only ever one, since release
+/// builds are single-instance. Dev builds step aside while that is held, and
+/// otherwise run each agent from whichever holds `<pubkey>.lock`. The OS lets go
+/// of both when a copy exits, however it exits.
 struct Hosting {
     dir: Result<PathBuf, String>,
-    /// A dev build steps aside for a packaged app that can run the same agent.
     packaged: bool,
-    held: Mutex<HashMap<String, Held>>,
-}
-#[derive(Default)]
-struct Held {
-    /// `<pubkey>.lock`: this copy runs the agent.
-    run: Option<File>,
-    /// `<pubkey>.packaged`, held by a packaged copy that can run it, so dev builds let go.
-    first: Option<File>,
+    /// The lock file this copy holds per agent: `.packaged` or `.lock`.
+    held: Mutex<HashMap<String, File>>,
 }
 impl Hosting {
-    fn held(&self) -> std::sync::MutexGuard<'_, HashMap<String, Held>> {
+    fn held(&self) -> std::sync::MutexGuard<'_, HashMap<String, File>> {
         self.held
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-    /// Whether this copy runs the agent, taking it if no other copy does. A dev
-    /// build lets go of it, and declines, while a packaged copy wants it.
+    /// Whether this copy runs the agent. The packaged app always does, so a
+    /// stuck dev build can never silence it. A dev build takes the agent if no
+    /// other copy runs it, and lets go while the packaged app does.
     #[allow(clippy::incompatible_msrv)] // `File` locking; see `sign_out::Instance`.
     fn claim(&self, pubkey: &str) -> Result<bool, String> {
         if pubkey.len() != 64
@@ -161,30 +158,29 @@ impl Hosting {
         }
         let dir = self.dir.as_ref().map_err(Clone::clone)?;
         std::fs::create_dir_all(dir).map_err(|_| "Could not open agent hosting")?;
-        let first = dir.join(format!("{pubkey}.packaged"));
+        let packaged = dir.join(format!("{pubkey}.packaged"));
         let mut held = self.held();
-        if !self.packaged {
-            let probe = open_lock(&first)?;
-            if !lock(probe.try_lock_shared())? {
-                held.remove(pubkey);
-                return Ok(false);
+        if self.packaged {
+            if !held.contains_key(pubkey) {
+                let file = open_lock(&packaged)?;
+                // A dev build checking for it holds it briefly; this tries again next time.
+                if lock(file.try_lock())? {
+                    held.insert(pubkey.into(), file);
+                }
             }
+            return Ok(true);
         }
-        let entry = held.entry(pubkey.into()).or_default();
-        if self.packaged && entry.first.is_none() {
-            let file = open_lock(&first)?;
-            // A dev build checking for it holds it briefly; this tries again next time.
-            if lock(file.try_lock())? {
-                entry.first = Some(file);
-            }
+        if !lock(open_lock(&packaged)?.try_lock_shared())? {
+            held.remove(pubkey);
+            return Ok(false);
         }
-        if entry.run.is_none() {
+        if !held.contains_key(pubkey) {
             let file = open_lock(&dir.join(format!("{pubkey}.lock")))?;
             if lock(file.try_lock())? {
-                entry.run = Some(file);
+                held.insert(pubkey.into(), file);
             }
         }
-        Ok(entry.run.is_some())
+        Ok(held.contains_key(pubkey))
     }
 }
 /// Whether a try at a lock took it; closing the file lets go.
@@ -645,22 +641,26 @@ mod tests {
     }
 
     #[test]
-    fn a_dev_build_lets_go_of_what_a_packaged_copy_can_run() {
+    fn a_packaged_app_runs_what_it_can_and_dev_builds_let_go() {
         let dir = tempfile::tempdir().unwrap();
         let (agent, other) = ("a".repeat(64), "b".repeat(64));
         let dev = hosting(Ok(dir.path().join("hosts")), false);
         let packaged = hosting(Ok(dir.path().join("hosts")), true);
         assert!(dev.claim(&agent).unwrap());
         assert!(dev.claim(&other).unwrap());
-        // The dev build had it first, and lets go at its next claim.
-        assert!(!packaged.claim(&agent).unwrap());
+        // The packaged app runs it at once, though the dev build had it first,
+        assert!(packaged.claim(&agent).unwrap());
+        // and the dev build lets go at its next claim.
         assert!(!dev.claim(&agent).unwrap());
         assert!(packaged.claim(&agent).unwrap());
-        assert!(!dev.claim(&agent).unwrap());
-        // One the packaged copy does not ask for stays with the dev build.
+        // A second dev build cannot take it either.
+        let another = hosting(Ok(dir.path().join("hosts")), false);
+        assert!(!another.claim(&agent).unwrap());
+        // One the packaged app does not ask for stays with the dev build.
         assert!(dev.claim(&other).unwrap());
         // As when it can no longer run it.
         packaged.held().remove(&agent);
         assert!(dev.claim(&agent).unwrap());
+        assert!(!another.claim(&agent).unwrap());
     }
 }

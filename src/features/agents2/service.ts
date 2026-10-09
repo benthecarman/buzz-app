@@ -605,6 +605,7 @@ export class Agents2Service extends Service implements Agents2 {
   // agent's type is replaced.
   private update() {
     const binding = this.binding;
+    const wasShown = new Set(this.state.agents.map((agent) => agent.pubkey));
     const identities = this.identities.filter((identity) => !identity.deleted);
     const agents: Agent[] = [];
     for (const identity of identities) {
@@ -652,9 +653,16 @@ export class Agents2Service extends Service implements Agents2 {
       });
       this.notify();
     }
-    // Resume runners whose queue paused while their agent was out of view.
+    // Resume runners whose queue paused while their agent was out of view, and
+    // claim or release each agent as it comes into or leaves view, so a copy of
+    // the app takes over without waiting for an event or tick.
+    const shown = new Set(agents.map((agent) => agent.pubkey));
     for (const runner of this.runners.values())
-      if (runner.queue.length) void this.drain(runner);
+      if (
+        runner.queue.length ||
+        shown.has(runner.pubkey) !== wasShown.has(runner.pubkey)
+      )
+        void this.drain(runner);
   }
   private notify() {
     for (const listener of this.listeners) listener();
@@ -829,16 +837,15 @@ export class Agents2Service extends Service implements Agents2 {
     runner.running = true;
     while (this.runners.get(runner.pubkey) === runner) {
       const agent = this.find(runner.pubkey);
-      // An agent this copy cannot run is left to another copy of the app.
-      if (!agent) {
-        await this.release(runner);
-        break;
-      }
       const type = runner.type;
       const run = type?.run;
-      if (!type || !run) {
-        runner.queue.length = 0;
+      // An agent this copy cannot run is left to another copy of the app.
+      if (!agent || !type || !run) {
+        if (agent) runner.queue.length = 0;
         await this.release(runner);
+        // It may have come back into view, or gained its type, meanwhile.
+        if (this.find(runner.pubkey) !== agent || runner.type !== type)
+          continue;
         break;
       }
       // Every copy of the app on this machine hears the same events; only the

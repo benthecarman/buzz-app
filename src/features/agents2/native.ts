@@ -63,8 +63,8 @@ export type AgentsNative = {
   /** Publishes its name as its profile unless the community already has it. */
   publishProfile(pubkey: string): Promise<void>;
   /** Whether this app runs the agent: every copy of the app on this machine
-   * shares the agent list, and one holds each agent until it exits. A dev build
-   * lets go while an installed app is running. */
+   * shares the agent list, and one runs each agent. The installed app always
+   * runs what it can; a dev build lets go while it does. */
   claim(pubkey: string): Promise<boolean>;
   /** Lets another copy run it. */
   release(pubkey: string): Promise<void>;

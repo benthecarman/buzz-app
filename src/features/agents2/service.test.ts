@@ -413,6 +413,17 @@ it("lets another copy of the app run an agent it cannot run", async () => {
   expect(native.claim).toHaveBeenCalledWith(bot);
 });
 
+it("claims an agent as it comes into view, and releases it as it leaves, without waiting for a tick", async () => {
+  const { service, native, connect } = await setup();
+  await service.create({ type: "example/echo", name: "Echo" });
+  await vi.waitFor(() => expect(native.claim).toHaveBeenCalledWith(bot));
+  connect(false);
+  await vi.waitFor(() => expect(native.release).toHaveBeenCalledWith(bot));
+  native.claim.mockClear();
+  connect(true);
+  await vi.waitFor(() => expect(native.claim).toHaveBeenCalledWith(bot));
+});
+
 it("is not woken by reactions, deletions or DMs", async () => {
   const { service, run, emit } = await setup();
   await service.create({ type: "example/echo", name: "Echo" });
