@@ -17,10 +17,7 @@ import { ThreadPanel } from "../../features/messages/ThreadPanel";
 import { ChannelPreview } from "./ChannelPreview";
 import { useIdentityNames } from "../../features/identity-names/react";
 import { selectProfiles } from "../../features/relay/profile-selection";
-import {
-  PanelHeader,
-  PanelHeaderLabel,
-} from "../../shared/design-system/ui/PanelHeader";
+import { PanelHeader } from "../../shared/design-system/ui/PanelHeader";
 import { IconButton } from "../../shared/design-system/ui/IconButton";
 import {
   ArrowSquareOutIcon,
@@ -192,18 +189,31 @@ export function InboxDetail({
       {resizeHandle}
       <PanelHeader
         title={
-          <PanelHeaderLabel
-            title={
-              channel?.channelType === "dm" ? "Direct message" : channelName
-            }
-            icon={
-              channel?.channelType === "dm" ? (
+          <div className="panel-header-label">
+            <span className="panel-header-label-icon" aria-hidden="true">
+              {channel?.channelType === "dm" ? (
                 <ChatCircleIcon size="1rem" />
               ) : (
                 <HashIcon size="1rem" />
-              )
-            }
-          />
+              )}
+            </span>
+            <h2 className={styles.detailHeadingTitle}>
+              <button
+                type="button"
+                className={styles.detailHeadingLink}
+                title={
+                  channel?.channelType === "dm"
+                    ? "Open conversation"
+                    : target.rootId
+                      ? "Open full thread"
+                      : "Open in channel"
+                }
+                onClick={() => void open()}
+              >
+                {channel?.channelType === "dm" ? "Direct message" : channelName}
+              </button>
+            </h2>
+          </div>
         }
         actions={
           <>

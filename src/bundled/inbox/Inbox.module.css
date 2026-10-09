@@ -58,6 +58,34 @@
   flex: 1;
 }
 
+.detailHeadingTitle {
+  min-width: 0;
+}
+
+.detailHeadingLink {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  text-align: start;
+}
+
+.detailHeadingLink:hover {
+  text-decoration: underline;
+}
+
+html[data-keyboard-navigation] .detailHeadingLink:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
 /* Share the header row even when larger text makes its controls wrap. */
 .workspace[data-selected] > .detail {
   grid-column: 2;

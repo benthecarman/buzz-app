@@ -879,9 +879,9 @@ it("filters real session evidence, opens an exact message and marks it read, and
   ).toBeInTheDocument();
   expect(h.open).not.toHaveBeenCalled();
   expect(
-    within(screen.getByRole("heading", { name: "#Design" })).getByRole(
+    within(screen.getByRole("heading", { name: "Design" })).getByRole(
       "button",
-      { name: "#Design" },
+      { name: "Design" },
     ),
   ).toHaveAttribute("title", "Open in channel");
   fireEvent.click(screen.getByRole("button", { name: "Open in channel" }));
@@ -1575,9 +1575,9 @@ it("does not accept a second row selection while its explicit read is pending", 
       screen.getByRole("heading", { name: "Direct message" }),
     ).toBeInTheDocument();
     expect(
-      within(screen.getByRole("heading", { name: "DM with Alice" })).getByRole(
+      within(screen.getByRole("heading", { name: "Direct message" })).getByRole(
         "button",
-        { name: "DM with Alice" },
+        { name: "Direct message" },
       ),
     ).toHaveAttribute("title", "Open conversation");
     expect(h.journal()?.state.frontiers[`msg:${h.mention.id}`]).toBeUndefined();

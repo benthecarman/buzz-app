@@ -287,8 +287,8 @@ it("opens the captured message from the channel heading", async () => {
   const h = await fixture();
   await opened(h);
   const open = vi.spyOn(navigator, "open");
-  const heading = screen.getByRole("heading", { name: "#Room" });
-  const link = within(heading).getByRole("button", { name: "#Room" });
+  const heading = screen.getByRole("heading", { name: "Room" });
+  const link = within(heading).getByRole("button", { name: "Room" });
   expect(link).toHaveAttribute("title", "Open in channel");
   fireEvent.click(link);
   await waitFor(() =>
