@@ -289,7 +289,7 @@ it("opens the captured message from the channel heading", async () => {
   const open = vi.spyOn(navigator, "open");
   const heading = screen.getByRole("heading", { name: "#Room" });
   const link = within(heading).getByRole("button", { name: "#Room" });
-  expect(link).toHaveAttribute("title", "Open full thread");
+  expect(link).toHaveAttribute("title", "Open in channel");
   fireEvent.click(link);
   await waitFor(() =>
     expect(open).toHaveBeenCalledWith({

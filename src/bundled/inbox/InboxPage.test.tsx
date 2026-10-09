@@ -883,7 +883,7 @@ it("filters real session evidence, opens an exact message and marks it read, and
       "button",
       { name: "#Design" },
     ),
-  ).toHaveAttribute("title", "Open full thread");
+  ).toHaveAttribute("title", "Open in channel");
   fireEvent.click(screen.getByRole("button", { name: "Open in channel" }));
   await waitFor(() =>
     expect(h.open).toHaveBeenCalledWith({
