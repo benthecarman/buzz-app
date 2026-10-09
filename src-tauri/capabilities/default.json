@@ -81,6 +81,8 @@
     "allow-app-agent-query",
     "allow-app-agent-upload",
     "allow-app-agent-remember",
+    "allow-app-agent-claim",
+    "allow-app-agent-release",
     "allow-agent-control-create-authorize",
     "allow-agent-control-create-commit",
     "allow-agent-control-creation-profile",

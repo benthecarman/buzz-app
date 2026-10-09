@@ -128,6 +128,8 @@ fn native_command_permissions_allow_only_main_webview() {
         "app_agent_query",
         "app_agent_upload",
         "app_agent_remember",
+        "app_agent_claim",
+        "app_agent_release",
         "agent_control_create_authorize",
         "agent_control_create_commit",
         "agent_control_creation_profile",

@@ -511,6 +511,8 @@ fn commands<R: tauri::Runtime>() -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Sen
         app_agents::app_agent_query,
         app_agents::app_agent_upload,
         app_agents::app_agent_remember,
+        app_agents::app_agent_claim,
+        app_agents::app_agent_release,
         agent_control_create_authorize,
         agent_control_create_commit,
         agent_control_creation_profile,
@@ -669,6 +671,8 @@ pub fn run() {
                     .as_ref()
                     .map(|(root, _, _)| root.with_file_name("agents2").join("identities.json"))
                     .map_err(Clone::clone),
+                // `just desktop` builds step aside for a packaged app.
+                !tauri::is_dev(),
             ));
             let agent_owner = agents::owner::Owner::select(
                 agent_identity,

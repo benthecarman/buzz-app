@@ -236,6 +236,9 @@ type Runner = {
   /** Events seen, and events it wrote (so replies to it are addressed). */
   readonly seen: Set<string>;
   readonly wrote: Set<string>;
+  /** Whether native may hold the agent for this copy; true at first, since
+   * native outlives a page reload. */
+  mayHold: boolean;
   compiled?: {
     attention: Agent["attention"];
     watches: readonly CompiledWatch[];
@@ -671,6 +674,7 @@ export class Agents2Service extends Service implements Agents2 {
       admitted: 0,
       seen: new Set(),
       wrote: new Set(),
+      mayHold: true,
     };
   }
   private retire(runner: Runner) {
@@ -825,13 +829,27 @@ export class Agents2Service extends Service implements Agents2 {
     runner.running = true;
     while (this.runners.get(runner.pubkey) === runner) {
       const agent = this.find(runner.pubkey);
-      if (!agent) break;
+      // An agent this copy cannot run is left to another copy of the app.
+      if (!agent) {
+        await this.release(runner);
+        break;
+      }
       const type = runner.type;
       const run = type?.run;
       if (!type || !run) {
         runner.queue.length = 0;
+        await this.release(runner);
         break;
       }
+      // Every copy of the app on this machine hears the same events; only the
+      // one holding the agent runs them. Asked on every wake too, so a copy
+      // takes over within a tick of the holder quitting or letting go.
+      if (!(await this.claim(runner))) {
+        runner.queue.length = 0;
+        break;
+      }
+      // The agent or its type may have changed meanwhile.
+      if (this.find(runner.pubkey) !== agent || runner.type !== type) continue;
       const job = runner.queue.shift() ?? this.dueTimer(agent);
       if (!job) break;
       const lifetime = runner.controller.signal;
@@ -879,6 +897,29 @@ export class Agents2Service extends Service implements Agents2 {
     runner.running = false;
   }
 
+  private async claim(runner: Runner) {
+    try {
+      runner.mayHold = (await this.native?.claim(runner.pubkey)) ?? false;
+      return runner.mayHold;
+    } catch (error) {
+      runner.mayHold = true;
+      // Answering twice beats not answering at all.
+      console.warn(
+        `Agent ${this.find(runner.pubkey)?.name} was not claimed`,
+        error,
+      );
+      return true;
+    }
+  }
+  private async release(runner: Runner) {
+    if (!runner.mayHold) return;
+    runner.mayHold = false;
+    await this.native
+      ?.release(runner.pubkey)
+      .catch((error) =>
+        console.warn(`Agent ${runner.pubkey} was not released`, error),
+      );
+  }
   private require() {
     if (!this.native) throw new Error("Agents run only in the desktop app");
     return this.native;

@@ -62,6 +62,12 @@ export type AgentsNative = {
   ): Promise<RelayEvent>;
   /** Publishes its name as its profile unless the community already has it. */
   publishProfile(pubkey: string): Promise<void>;
+  /** Whether this app runs the agent: every copy of the app on this machine
+   * shares the agent list, and one holds each agent until it exits. A dev build
+   * lets go while an installed app is running. */
+  claim(pubkey: string): Promise<boolean>;
+  /** Lets another copy run it. */
+  release(pubkey: string): Promise<void>;
 };
 
 export const nativeAgents = (): AgentsNative | undefined =>
@@ -90,5 +96,7 @@ export const nativeAgents = (): AgentsNative | undefined =>
           invoke("app_agent_remember", { pubkey, slug, body, after }),
         publishProfile: (pubkey) =>
           invoke("app_agent_publish_profile", { pubkey }),
+        claim: (pubkey) => invoke("app_agent_claim", { pubkey }),
+        release: (pubkey) => invoke("app_agent_release", { pubkey }),
       }
     : undefined;
