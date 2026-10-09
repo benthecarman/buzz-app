@@ -215,6 +215,30 @@ it("stops granting once the plugin is turned off", async () => {
   expect(() => host.snapshot()).toThrow("does not declare host.plugins");
 });
 
+it("stops granting once a new revision drops host.plugins", async () => {
+  const { host: grant, plugins } = await harness({
+    changePlugin: vi.fn(async () =>
+      ready(true, [
+        {
+          ...info(managing),
+          manifest: { id: managing.id, name: managing.name, apiVersion: 1 },
+          source: "external",
+          revision: "r2",
+        },
+        info(plain),
+        info(target),
+      ]),
+    ),
+  });
+  const host = grant(managing.id);
+  expect(host.snapshot().status).toBe("ready");
+  await plugins.change("enable", managing.id);
+  expect(() => host.snapshot()).toThrow("does not declare host.plugins");
+  await expect(host.change("disable", target.id)).rejects.toThrow(
+    "does not declare host.plugins",
+  );
+});
+
 it("reports that imports need the desktop app in the browser", async () => {
   const { host: grant } = await harness({ imports: undefined });
   const host = grant(managing.id);
