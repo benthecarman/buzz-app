@@ -171,7 +171,30 @@ second
     expect(html).not.toContain("<script");
     expect(html).not.toContain("<b>");
     expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;");
+    expect(html).toContain("before &lt;b&gt;raw&lt;/b&gt;");
     expect(html).toContain("remote alt");
+  });
+
+  it("shows angle-bracket prose as the exact typed text", () => {
+    expect(render("<harness stuff goes here>")).toContain(
+      "<p>&lt;harness stuff goes here&gt;</p>",
+    );
+    expect(render("run the <harness> now")).toContain(
+      "<p>run the &lt;harness&gt; now</p>",
+    );
+    expect(render("**<harness>** and _<b>x</b>_")).toContain(
+      "<strong>&lt;harness&gt;</strong> and <em>&lt;b&gt;x&lt;/b&gt;</em>",
+    );
+    const block = render(
+      '<div onclick="x()">\n**not bold** :party:\n</div>\n\n<!-- note -->',
+    );
+    expect(block).toContain(
+      "<p>&lt;div onclick=&quot;x()&quot;&gt;<br/>\n**not bold** :party:<br/>\n&lt;/div&gt;</p>",
+    );
+    expect(block).toContain("<p>&lt;!-- note --&gt;</p>");
+    expect(block).not.toContain("<div onclick");
+    expect(block).not.toContain("<strong>");
   });
 
   it("allows credential-free HTTP(S) links and makes other destinations non-clickable", () => {

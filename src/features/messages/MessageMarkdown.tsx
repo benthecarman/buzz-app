@@ -235,6 +235,53 @@ function inlineProtectionKey(
   ]);
 }
 
+const phrasingParents = new Set([
+  "paragraph",
+  "heading",
+  "emphasis",
+  "strong",
+  "delete",
+  "link",
+  "linkReference",
+  "tableCell",
+]);
+
+/** Chat never renders raw HTML, but `<harness>` is still something the author
+ * typed. Show the exact source as text, with chat line breaks, instead of
+ * dropping it. Run last: the source is literal, so no mention, emoji or
+ * autolink processing applies. */
+function remarkLiteralHtml() {
+  const literal = (value: string): MarkdownNode[] =>
+    value
+      .split(/\r?\n|\r/)
+      .flatMap((line, index) => [
+        ...(index ? [{ type: "break" }] : []),
+        ...(line ? [{ type: "text", value: line }] : []),
+      ]);
+  return (tree: MarkdownNode) => {
+    const visit = (parent: MarkdownNode) => {
+      if (!parent.children) return;
+      parent.children = parent.children.flatMap((child) => {
+        if (child.type !== "html") {
+          visit(child);
+          return [child];
+        }
+        const text = literal(child.value ?? "");
+        return phrasingParents.has(parent.type)
+          ? text
+          : [
+              {
+                type: "paragraph",
+                children: text,
+                ...(child.position ? { position: child.position } : {}),
+              },
+            ];
+      });
+    };
+    visit(tree);
+  };
+}
+
 /** Offer only Markdown prose to profile controls and inline plugins. */
 function remarkInlineContent(protectedContent: ProtectedContent) {
   const restore = (value: string) =>
@@ -621,6 +668,7 @@ const MarkdownBody = memo(function MarkdownBody({
         remarkBreaks,
         [remarkSpoilers, `<${protectedContent.prefix}spoiler\uE002>`],
         [remarkInlineContent, protectedContent],
+        remarkLiteralHtml,
       ]}
       components={markdownComponents}
       skipHtml

@@ -316,8 +316,8 @@ it("names the channel and the reminder in banners through the real notification 
         note("unknown", { target: elsewhere, note: "follow up" }),
         note("bare", { target: elsewhere }),
         note("note", { note: "call **back**" }),
-        note("html", {
-          target: { ...target, preview: "<div></div>" },
+        note("definition", {
+          target: { ...target, preview: "[ref]: https://example.com/private" },
           note: "see note",
         }),
       ]),

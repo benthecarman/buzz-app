@@ -43,12 +43,12 @@ it("DM mentions do not expose an internal DM name; missing names use key fragmen
     messageNotificationText(message, "thread", undefined, { name: " " }).title,
   ).toBe("aaaaaaaaaa replied in #room");
 });
-it("flattens blocks, links, images, escapes and code without URLs or raw HTML", () => {
+it("flattens blocks, links, images, escapes and code without URLs", () => {
   expect(
     messagePreview(
-      "# Heading\n\n**hello** [world](https://example.com)\n\n- one\n- two\n\n`a_b` ![private alt](https://example.com/image)\n\n<div>hidden</div>",
+      "# Heading\n\n**hello** [world](https://example.com)\n\n- one\n- two\n\n`a_b` ![private alt](https://example.com/image)\n\n<div>shown</div>",
     ),
-  ).toBe("Heading hello world one two a_b [Image]");
+  ).toBe("Heading hello world one two a_b [Image] <div>shown</div>");
   expect(
     messagePreview("[label][ref]\n\n[ref]: https://example.com/private"),
   ).toBe("label");
@@ -60,7 +60,9 @@ it("bounds source, Unicode output and nesting, with a nonempty fallback", () => 
   expect(messagePreview("😀".repeat(400))).toBe(`${"😀".repeat(199)}…`);
   expect(messagePreview(`${" ".repeat(4096)}not parsed`)).toBe("New message");
   expect(messagePreview(`${"> ".repeat(120)}deep`)).toBe("New message");
-  expect(messagePreview("<div>hidden</div>")).toBe("New message");
+  expect(messagePreview("<harness stuff goes here>")).toBe(
+    "<harness stuff goes here>",
+  );
 });
 it("normalizes whitespace/control characters in names and body", () => {
   const text = messageNotificationText(

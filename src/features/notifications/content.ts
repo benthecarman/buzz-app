@@ -25,7 +25,7 @@ function shortText(value: string, limit: number) {
 
 type TextNode = { type: string; value?: string; children?: TextNode[] };
 function prose(node: TextNode): string {
-  if (node.type === "html" || node.type === "definition") return "";
+  if (node.type === "definition") return "";
   if (node.type === "image" || node.type === "imageReference") return "[Image]";
   if (node.type === "break" || node.type === "thematicBreak") return " ";
   if (node.value !== undefined) return node.value;
