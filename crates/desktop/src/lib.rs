@@ -17,6 +17,7 @@ pub mod oauth_callback;
 pub mod pi_models;
 pub mod process;
 pub mod relay;
+pub mod sign_out;
 pub mod terminal;
 #[doc(hidden)]
 pub mod test_executable;
