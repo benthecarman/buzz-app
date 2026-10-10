@@ -59,8 +59,6 @@ use agent_models::{agent_models_begin, agent_models_cancel, agent_models_run, Mo
 #[cfg(test)]
 use buzz_desktop::test_executable;
 mod harness_setup;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod managed_npm;
 use agents::{
     agent_control_action, agent_control_attach_mention, agent_control_clone_settings,
     agent_control_create_authorize, agent_control_create_commit, agent_control_create_prepare,

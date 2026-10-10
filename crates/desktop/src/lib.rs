@@ -10,6 +10,9 @@ pub mod browser;
 pub(crate) mod codex_models;
 pub mod event;
 pub mod goose_models;
+pub mod harness_setup;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub mod managed_npm;
 pub mod media;
 pub mod oauth_callback;
 pub mod pi_models;

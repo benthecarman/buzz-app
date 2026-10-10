@@ -319,7 +319,7 @@ fn npm_choice(user: NpmTools, managed: NpmTools) -> (Option<PathBuf>, &'static s
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn pi_current(app_data: &std::path::Path) -> bool {
-    crate::managed_npm::current(app_data)
+    buzz_desktop::managed_npm::current(app_data)
 }
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn pi_current(_: &std::path::Path) -> bool {
