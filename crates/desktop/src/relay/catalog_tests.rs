@@ -1,4 +1,5 @@
-use super::super::{validate_event, EventTemplate};
+use crate::event::EventTemplate;
+use crate::relay::events::validate_event;
 
 #[test]
 fn catalog_publications_admit_only_the_nip_ap_envelope() {

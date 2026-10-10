@@ -1,15 +1,16 @@
 //! NIP-AP catalog envelopes: agent definitions (30175) and team projections (30178).
 //! The signer admits only the owner-to-self envelope; content parsing stays in JS,
 //! but secrets-bearing fields are refused here as a last line of defense.
-use super::EventTemplate;
+use crate::event::EventTemplate;
 use serde_json::Value;
 
 const MAX_CONTENT: usize = 65_535;
 /// Serialized event bound: JSON escaping at most doubles JSON-text content, plus
 /// the bounded tags and fields. Mirrors `MAX_EVENT_BYTES` in `catalog-envelope.ts`.
-pub(super) const MAX_EVENT_BYTES: usize = 2 * MAX_CONTENT + 2048;
+pub const MAX_EVENT_BYTES: usize = 2 * MAX_CONTENT + 2048;
 
-pub(super) fn is_catalog(kind: u16) -> bool {
+/// Whether `kind` is a NIP-AP catalog kind.
+pub fn is_catalog(kind: u16) -> bool {
     matches!(kind, 30175 | 30178)
 }
 
@@ -29,7 +30,7 @@ fn team_id(value: &str) -> bool {
 }
 
 /** Exactly one `d`, at most one exact `["shared","true"]`, at most one `client-id`. */
-pub(super) fn valid(event: &EventTemplate) -> bool {
+pub(crate) fn valid(event: &EventTemplate) -> bool {
     if !is_catalog(event.kind)
         // Signed events return to JavaScript; timestamps must fit Number.MAX_SAFE_INTEGER.
         || event.created_at > 9_007_199_254_740_991
