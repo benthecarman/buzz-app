@@ -398,7 +398,7 @@ fn release_id(shim: &Path) -> Option<String> {
 }
 
 /// Whether both app-owned shims point at a release of the pinned adapter.
-pub(crate) fn current(app_data: &Path) -> bool {
+pub fn current(app_data: &Path) -> bool {
     let bin = app_data.join("node-tools/bin");
     ["pi", "buzz-pi-acp"].iter().all(|name| {
         release_id(&bin.join(name))
