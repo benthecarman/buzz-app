@@ -23,14 +23,14 @@ export function openArchive(path = archivePath()) {
     if (version === 0) {
       db.exec(
         readFileSync(
-          new URL("../src/features/archive/schema.sql", import.meta.url),
+          new URL("../crates/desktop/src/archive/schema.sql", import.meta.url),
           "utf8",
         ),
       );
     } else if (version === 1) {
       db.exec(
         readFileSync(
-          new URL("../src/features/archive/migrate-v2.sql", import.meta.url),
+          new URL("../crates/desktop/src/archive/migrate-v2.sql", import.meta.url),
           "utf8",
         ),
       );
