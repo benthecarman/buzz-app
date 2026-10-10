@@ -8,7 +8,7 @@ use nostr::{
     nips::nip44,
 };
 use secp256k1::{Keypair, PublicKey, Secp256k1, SecretKey};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 use zeroize::Zeroizing;
@@ -38,14 +38,7 @@ fn decrypt_with_conversation(
 // No Debug/Serialize: only deliberate export may return the secret to the main UI.
 struct Key(Zeroizing<[u8; 32]>);
 
-#[derive(Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct EventTemplate {
-    pub created_at: u64,
-    pub kind: u16,
-    pub tags: Vec<Vec<String>>,
-    pub content: String,
-}
+pub(crate) use buzz_desktop::EventTemplate;
 
 impl Key {
     fn sign(&self, event: EventTemplate) -> Result<serde_json::Value> {
@@ -934,6 +927,15 @@ impl IdentityHost {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).close();
     }
 }
+impl buzz_desktop::Signer for IdentityHost {
+    fn sign(
+        &self,
+        event: EventTemplate,
+    ) -> impl std::future::Future<Output = Result<serde_json::Value>> + Send {
+        IdentityHost::sign(self, event)
+    }
+}
+
 impl Default for IdentityHost {
     fn default() -> Self {
         Self(Arc::new(Mutex::new(Identity {

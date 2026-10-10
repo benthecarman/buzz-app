@@ -56,9 +56,9 @@ use relay::{
     relay_upload_chunk, relay_workflow_runs,
 };
 mod terminal;
-#[cfg(test)]
-mod test_executable;
 use agent_models::{agent_models_begin, agent_models_cancel, agent_models_run, ModelHost};
+#[cfg(test)]
+use buzz_desktop::test_executable;
 mod goose_models;
 mod harness_setup;
 #[cfg(any(target_os = "macos", target_os = "linux"))]

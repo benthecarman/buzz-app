@@ -10,7 +10,7 @@ use std::path::Path;
 /// process therefore never opens `path` for writing: it writes a sibling
 /// source file, and a single-threaded `cp` process creates the executable.
 #[cfg(unix)]
-pub(crate) fn write_executable(path: &Path, contents: impl AsRef<[u8]>) {
+pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>) {
     use std::os::unix::fs::PermissionsExt;
     let mut source = path.as_os_str().to_owned();
     source.push(".source");
@@ -28,6 +28,6 @@ pub(crate) fn write_executable(path: &Path, contents: impl AsRef<[u8]>) {
 
 /// Windows has no fork, so a plain write cannot leak a descriptor.
 #[cfg(not(unix))]
-pub(crate) fn write_executable(path: &Path, contents: impl AsRef<[u8]>) {
+pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>) {
     std::fs::write(path, contents).unwrap();
 }

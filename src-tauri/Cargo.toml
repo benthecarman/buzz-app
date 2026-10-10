@@ -28,6 +28,7 @@ wry = { version = "=0.55.1", default-features = false, features = ["os-webview"]
 buzzodz-plugins = { path = "../crates/plugin-manager" }
 buzz-credential-store = { path = "../crates/credential-store" }
 buzz-agent-controller = { path = "../crates/agent-controller" }
+buzz-desktop = { path = "../crates/desktop" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 buzz-agent = { git = "https://github.com/block/buzz.git", rev = "4f51b9e1010e086a16c099cd8d8218ca974a5e18" }

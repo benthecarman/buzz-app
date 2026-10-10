@@ -676,6 +676,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "buzz-desktop"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "futures-util",
+ "getrandom 0.3.4",
+ "http",
+ "libc",
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "url",
+ "uuid",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "buzz-foundation"
 version = "0.0.0"
 dependencies = [
@@ -686,6 +709,7 @@ dependencies = [
  "buzz-agent",
  "buzz-agent-controller",
  "buzz-credential-store",
+ "buzz-desktop",
  "buzz-pairing",
  "buzzodz-plugins",
  "bytes",
