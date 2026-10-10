@@ -125,7 +125,9 @@ async fn connect_catalog_actual_worker_inference_401_refresh_and_restart_share_c
         connection.models(None).await.unwrap()[0].id,
         "synthetic-model"
     );
-    let tools = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/agent-runtime");
+    // The app stages the runtime it bundles under its own resources.
+    let tools =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../src-tauri/resources/agent-runtime");
     buzz_agent_controller::RuntimeBundle::new(tools.clone()).expect("verified runtime resources");
     for iteration in 0..2 {
         let mut child = Owned(

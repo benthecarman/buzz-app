@@ -4,6 +4,7 @@
 //! paths, handles and signer it needs from its caller and reports progress
 //! through callbacks, so nothing here depends on an app runtime.
 
+pub mod agent_models;
 pub mod archive;
 pub mod browser;
 pub mod event;
