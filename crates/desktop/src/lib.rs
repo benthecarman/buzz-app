@@ -11,6 +11,7 @@ pub mod media;
 pub mod oauth_callback;
 pub mod process;
 pub mod relay;
+pub mod sign_out;
 pub mod terminal;
 #[doc(hidden)]
 pub mod test_executable;

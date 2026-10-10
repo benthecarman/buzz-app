@@ -9,16 +9,17 @@ rust-version = "1.77.2"
 [dependencies]
 base64 = "0.22"
 bytes = "1"
+dirs = "6"
+fs2 = "0.4"
 futures-util = "0.3"
 getrandom = { version = "0.3", features = ["std"] }
 hmac = "0.12"
 http = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
-fs2 = "0.4"
 nostr = { version = "=0.45.5", default-features = false, features = ["std", "nip44", "os-rng"] }
 percent-encoding = "2"
-rusqlite = { version = "0.38", features = ["bundled"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+rusqlite = { version = "0.38", features = ["bundled"] }
 secp256k1 = { version = "0.31", default-features = false, features = ["std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }

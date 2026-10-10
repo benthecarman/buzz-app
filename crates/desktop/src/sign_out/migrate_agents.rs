@@ -2,7 +2,7 @@
 //! have upgraded, together with the boot call and legacy erase/keep entries.
 use super::{real_dir, wait_for, Locks, Paths, AGENTS};
 
-pub(crate) const LEGACY: &str = "agents2";
+pub const LEGACY: &str = "agents2";
 
 #[allow(clippy::incompatible_msrv)] // File locking, like the owning sign_out module.
 pub(super) fn migrate(paths: &Paths, locks: &Locks) -> Result<(), String> {
