@@ -1,0 +1,33 @@
+[package]
+name = "buzz-desktop"
+# Matches the app package: the terminal reports this as BUZZ_TERM_VERSION.
+version = "0.0.0"
+description = "Native desktop services shared by Buzz front ends"
+edition = "2021"
+rust-version = "1.77.2"
+
+[dependencies]
+base64 = "0.22"
+bytes = "1"
+futures-util = "0.3"
+getrandom = "0.3"
+http = "1"
+percent-encoding = "2"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+tokio = { version = "1", features = ["sync", "time", "macros", "process", "io-util", "net", "rt", "fs"] }
+tokio-util = "0.7"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util", "rt-multi-thread"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_JobObjects", "Win32_System_Threading"] }
