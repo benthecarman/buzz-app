@@ -1258,7 +1258,7 @@ async fn start_guarded(
     .await?;
     let probed_pi = matches!(&pi, Ok(Some(_)));
     let preflight = match pi {
-        Ok(Some(pi)) => crate::pi_models::verify(pi)
+        Ok(Some(pi)) => buzz_desktop::pi_models::verify(pi)
             .await
             .map(|pi| buzz_agent_controller::pi::LaunchPreflight::new(Some(pi))),
         Ok(None) => Ok(buzz_agent_controller::pi::LaunchPreflight::new(None)),

@@ -58,11 +58,9 @@ mod terminal;
 use agent_models::{agent_models_begin, agent_models_cancel, agent_models_run, ModelHost};
 #[cfg(test)]
 use buzz_desktop::test_executable;
-mod goose_models;
 mod harness_setup;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod managed_npm;
-mod pi_models;
 use agents::claude_auth_status;
 use agents::{
     agent_control_action, agent_control_attach_mention, agent_control_clone_settings,

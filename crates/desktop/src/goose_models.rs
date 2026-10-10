@@ -25,7 +25,8 @@ impl Drop for CheckChild {
 /// Run one Goose turn without tools. ACP uses a hidden temporary session;
 /// the external CLI can avoid saving a session altogether.
 /// The selected draft and write-only overrides are resolved by the controller.
-pub(super) async fn test(mut context: GooseModelContext) -> Result<String, String> {
+/// Returns the `provider/model` that replied, which may be Goose's default.
+pub async fn test(mut context: GooseModelContext) -> Result<String, String> {
     if context.model_id.is_empty() {
         // Goose owns defaults for built-in and dynamically registered providers.
         // Resolve only the requested provider, never a saved model from another.
@@ -342,7 +343,9 @@ fn goose_command(context: &GooseModelContext) -> tokio::process::Command {
     command
 }
 
-pub(super) async fn fetch(context: GooseModelContext) -> Result<Vec<String>, String> {
+/// The provider's model IDs from Goose's live catalog. Goose may start a
+/// provider sign-in on a cache miss, so call it only on explicit user intent.
+pub async fn fetch(context: GooseModelContext) -> Result<Vec<String>, String> {
     let response = rpc(&context, METHOD, json!({"providerId":context.provider_id})).await?;
     parse_response(&response, &context.provider_id)
 }
@@ -445,6 +448,27 @@ fn parse_response(value: &Value, provider_id: &str) -> Result<Vec<String>, Strin
 mod tests {
     use super::*;
 
+    /// The app's test agent host refuses keychain access the same way.
+    struct NoCredentials;
+    impl buzz_agent_controller::Credentials for NoCredentials {
+        fn read_legacy(
+            &self,
+            _: buzz_agent_controller::LegacySource,
+            _: &str,
+        ) -> Result<buzz_agent_controller::Secret, String> {
+            Err("Keychain access is disabled in tests".into())
+        }
+        fn read(&self, _: &str, _: &str) -> Result<Option<buzz_agent_controller::Secret>, String> {
+            Err("Keychain access is disabled in tests".into())
+        }
+        fn add(&self, _: &str, _: &buzz_agent_controller::Secret) -> Result<(), String> {
+            Err("Keychain access is disabled in tests".into())
+        }
+        fn delete(&self, _: &str, _: &str) -> Result<(), String> {
+            Err("Keychain access is disabled in tests".into())
+        }
+    }
+
     #[tokio::test]
     #[ignore = "requires installed Goose and a signed-in BUZZ_TEST_GOOSE_PROVIDER; sends tiny live requests"]
     async fn installed_goose_provider_test_uses_production_context() {
@@ -453,28 +477,32 @@ mod tests {
             std::env::var("BUZZ_TEST_GOOSE_COMMAND").expect("set BUZZ_TEST_GOOSE_COMMAND");
         let provider =
             std::env::var("BUZZ_TEST_GOOSE_PROVIDER").expect("set BUZZ_TEST_GOOSE_PROVIDER");
-        let (dir, host, _app, _view) = crate::agents::tests::fixture();
+        let dir = tempfile::tempdir().unwrap();
+        // The app resolves drafts as below, over a controller like its own.
+        let controller = buzz_agent_controller::Controller::new(
+            buzz_agent_controller::Store::open(dir.path().join("store")).unwrap(),
+            std::sync::Arc::new(NoCredentials),
+            Err("Runtime bundle is missing".into()),
+            dir.path().join("ownership"),
+        );
         let context = |provider: &str, environment| {
-            host.goose_model_context(
-                None,
-                None,
-                AgentEdit {
-                    effort: None,
-                    name: "Probe".into(),
-                    picture: None,
-                    system_prompt: String::new(),
-                    session_policy: Some(None),
-                    workspace: dir.path().display().to_string(),
-                    harness: HarnessEdit {
-                        command: command.clone(),
-                        args: vec!["acp".into()],
-                        provider: provider.into(),
-                        model: String::new(),
-                        databricks: None,
-                    },
-                    environment,
+            buzz_agent_controller::prepare_tools_path();
+            controller.draft_goose_model_context(controller.effective_draft(AgentEdit {
+                effort: None,
+                name: "Probe".into(),
+                picture: None,
+                system_prompt: String::new(),
+                session_policy: Some(None),
+                workspace: dir.path().display().to_string(),
+                harness: HarnessEdit {
+                    command: command.clone(),
+                    args: vec!["acp".into()],
+                    provider: provider.into(),
+                    model: String::new(),
+                    databricks: None,
                 },
-            )
+                environment,
+            })?)
         };
         let providers = [
             "openai",
@@ -484,7 +512,7 @@ mod tests {
             "databricks_v2",
         ];
         let metadata = rpc(
-            &context(&provider, Default::default()).await.unwrap(),
+            &context(&provider, Default::default()).unwrap(),
             "_goose/unstable/providers/list",
             json!({"providerIds":providers}),
         )
@@ -501,7 +529,7 @@ mod tests {
                 .is_some_and(|model| !model.is_empty()));
             println!("Goose {id} default: {}", entry["defaultModel"]);
         }
-        let tested = test(context(&provider, Default::default()).await.unwrap())
+        let tested = test(context(&provider, Default::default()).unwrap())
             .await
             .unwrap();
         assert!(tested.starts_with(&format!("{provider}/")));
@@ -517,7 +545,6 @@ mod tests {
                     provider,
                     [(key.to_owned(), Some("buzz-invalid-key".to_owned()))].into(),
                 )
-                .await
                 .unwrap(),
             )
             .await;
