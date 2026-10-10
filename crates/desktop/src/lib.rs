@@ -6,6 +6,7 @@
 
 pub mod event;
 pub mod media;
+pub mod oauth_callback;
 pub mod process;
 pub mod relay;
 pub mod terminal;

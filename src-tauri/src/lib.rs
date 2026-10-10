@@ -733,10 +733,11 @@ pub fn run() {
             }
         })
         .on_page_load(|webview, payload| {
-            if let Err(error) = webview
-                .state::<OAuthCallbackHost>()
-                .document_load(webview.label(), payload.event())
-            {
+            if let Err(error) = oauth_callback::document_load(
+                &webview.state::<OAuthCallbackHost>(),
+                webview.label(),
+                payload.event(),
+            ) {
                 eprintln!("OAuth callback cleanup failed: {error}");
             }
             if webview.label() == "main" && matches!(payload.event(), tauri::webview::PageLoadEvent::Started) {
