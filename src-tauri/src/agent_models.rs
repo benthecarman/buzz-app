@@ -336,11 +336,14 @@ pub(crate) async fn agent_models_run<R: tauri::Runtime>(
                 if request.action == Operation::Disconnect {
                     return Err("Pi credentials are managed by Pi".into());
                 }
-                let context = crate::pi_models::verify(prepared?).await?.into_context();
+                let context = buzz_desktop::pi_models::verify(prepared?)
+                    .await?
+                    .into_context();
                 if request.action == Operation::Test {
                     let harness = &edit.harness;
                     let tested_model =
-                        crate::pi_models::test(context, &harness.provider, &harness.model).await?;
+                        buzz_desktop::pi_models::test(context, &harness.provider, &harness.model)
+                            .await?;
                     return Ok(Catalog {
                         host: String::new(),
                         models: vec![],
@@ -350,7 +353,7 @@ pub(crate) async fn agent_models_run<R: tauri::Runtime>(
                         codex: None,
                     });
                 }
-                let models = crate::pi_models::fetch(context)
+                let models = buzz_desktop::pi_models::fetch(context)
                     .await?
                     .into_iter()
                     .map(|id| Model {
@@ -401,7 +404,7 @@ pub(crate) async fn agent_models_run<R: tauri::Runtime>(
                     // must not return their hidden provider/model values to IPC.
                     let selection_overridden = context.model_overridden
                         || context.environment.contains_key("GOOSE_PROVIDER");
-                    let tested_model = crate::goose_models::test(context).await?;
+                    let tested_model = buzz_desktop::goose_models::test(context).await?;
                     return Ok(Catalog {
                         host: String::new(),
                         models: vec![],
@@ -412,7 +415,7 @@ pub(crate) async fn agent_models_run<R: tauri::Runtime>(
                     });
                 }
                 let model_overridden = context.model_overridden;
-                let models = crate::goose_models::fetch(context)
+                let models = buzz_desktop::goose_models::fetch(context)
                     .await?
                     .into_iter()
                     .map(|id| Model {

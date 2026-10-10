@@ -34,8 +34,9 @@ impl Drop for LookupChild {
     }
 }
 
-/// Used by Start and ticket-owned model work, outside controller admission.
-pub(crate) async fn verify(
+/// Checks the Pi CLI version before a context may run Pi. Used by Start and
+/// ticket-owned model work, outside controller admission.
+pub async fn verify(
     context: PiContext,
 ) -> Result<buzz_agent_controller::pi::VerifiedPiContext, String> {
     let mut command = tokio::process::Command::from(context.version_command());
@@ -120,7 +121,9 @@ fn spawn(
     ))
 }
 
-pub(super) async fn fetch(context: PiContext) -> Result<Vec<String>, String> {
+/// Every `provider/model` ID Pi offers with this agent's configuration,
+/// sorted and deduplicated. Starts no session and sends no prompt.
+pub async fn fetch(context: PiContext) -> Result<Vec<String>, String> {
     let args = context.catalog_args()?;
     let (child, mut stdin, mut reader) = spawn(context, args)?;
     stdin
@@ -152,12 +155,9 @@ const TEST_FAILURE: &str =
     "Connection test failed. Check the provider, model and network, then test again.";
 
 /// Verifies Pi's selected provider, then sends one tiny prompt through the
-/// agent's setup. The first assistant reply decides the result.
-pub(super) async fn test(
-    context: PiContext,
-    provider: &str,
-    model: &str,
-) -> Result<String, String> {
+/// agent's setup. The first assistant reply decides the result, returned as
+/// the `provider/model` that answered.
+pub async fn test(context: PiContext, provider: &str, model: &str) -> Result<String, String> {
     if provider.is_empty() {
         return Err("Choose a provider to test".into());
     }

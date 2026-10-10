@@ -7,8 +7,10 @@
 pub mod archive;
 pub mod browser;
 pub mod event;
+pub mod goose_models;
 pub mod media;
 pub mod oauth_callback;
+pub mod pi_models;
 pub mod process;
 pub mod relay;
 pub mod terminal;
