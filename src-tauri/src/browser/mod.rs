@@ -1,7 +1,6 @@
 //! Remote website content embedded in the main window without a Tauri bridge.
 
 mod platform;
-mod policy;
 
 use std::{
     cell::RefCell,
@@ -13,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Webview};
 use wry::{PageLoadEvent, Rect, WebView, WebViewBuilder};
 
-pub use policy::BrowserBounds;
-use policy::NavigationPolicy;
+pub use buzz_desktop::browser::BrowserBounds;
+use buzz_desktop::browser::NavigationPolicy;
 
 thread_local! {
     // Wry and its delegates must be created, used, and dropped on the UI thread.

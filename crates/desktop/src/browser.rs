@@ -1,18 +1,25 @@
+//! Rules for Buzz Browser: which URLs it may open and where its view may sit.
 use url::Url;
 
 const MAXIMUM_URL_BYTES: usize = 2048;
 
+/// Decides which URLs Buzz Browser may load: credential-free HTTP(S)
+/// websites, never the app's own origins.
 #[derive(Clone)]
-pub(super) struct NavigationPolicy {
+pub struct NavigationPolicy {
     development_url: Option<Url>,
 }
 
 impl NavigationPolicy {
-    pub(super) fn new(development_url: Option<Url>) -> Self {
+    /// Creates a policy. `development_url` is the dev server that serves the
+    /// app in debug builds, which must not open as a website.
+    pub fn new(development_url: Option<Url>) -> Self {
         Self { development_url }
     }
 
-    pub(super) fn validate(&self, target: &str) -> Result<Url, String> {
+    /// Parses `target` and returns it normalized, or a message to show the
+    /// user.
+    pub fn validate(&self, target: &str) -> Result<Url, String> {
         if target.len() > MAXIMUM_URL_BYTES {
             return Err("Browser URLs cannot exceed 2048 bytes".into());
         }
@@ -44,14 +51,19 @@ impl NavigationPolicy {
 /// Coordinates relative to the main webview's CSS viewport.
 #[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq)]
 pub struct BrowserBounds {
+    /// Left edge.
     pub x: f64,
+    /// Top edge.
     pub y: f64,
+    /// Width, which must be positive.
     pub width: f64,
+    /// Height, which must be positive.
     pub height: f64,
 }
 
 impl BrowserBounds {
-    pub(super) fn validate(self) -> Result<(), String> {
+    /// Rejects non-finite, negative or empty bounds.
+    pub fn validate(self) -> Result<(), String> {
         if ![self.x, self.y, self.width, self.height]
             .iter()
             .all(|value| value.is_finite())
@@ -67,8 +79,9 @@ impl BrowserBounds {
         Ok(())
     }
 
-    #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    pub(super) fn clip(self, width: f64, height: f64) -> Result<Self, String> {
+    /// Clips the bounds to a `width` by `height` viewport. Fails if nothing
+    /// visible remains.
+    pub fn clip(self, width: f64, height: f64) -> Result<Self, String> {
         self.validate()?;
         let clipped = Self {
             width: self.width.min(width - self.x),
