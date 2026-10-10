@@ -290,7 +290,7 @@ test("v1 migration preserves encrypted rows, policy settings and CAS revisions",
   const file = path(),
     db = new DatabaseSync(file);
   const schema = readFileSync(
-    new URL("../src/features/archive/schema.sql", import.meta.url),
+    new URL("../crates/desktop/src/archive/schema.sql", import.meta.url),
     "utf8",
   ).replace(
     "  enabled INTEGER",

@@ -23,6 +23,9 @@ fn valid_kind(kind: u16) -> Result<()> {
     }
 }
 impl Store {
+    pub(super) fn busy_handler(&self, busy: fn(i32) -> bool) -> rusqlite::Result<()> {
+        self.0.busy_handler(Some(busy))
+    }
     pub(super) fn open(path: PathBuf) -> Result<Self> {
         let parent = path.parent().ok_or("Archive location unavailable")?;
         std::fs::create_dir_all(parent).map_err(|_| "Archive directory unavailable")?;
@@ -44,14 +47,9 @@ impl Store {
             return Err("Archive was created by a newer app".into());
         }
         if version == 0 {
-            database(
-                connection.execute_batch(include_str!("../../../src/features/archive/schema.sql")),
-            )?;
+            database(connection.execute_batch(include_str!("schema.sql")))?;
         } else if version == 1 {
-            database(
-                connection
-                    .execute_batch(include_str!("../../../src/features/archive/migrate-v2.sql")),
-            )?;
+            database(connection.execute_batch(include_str!("migrate-v2.sql")))?;
         }
         database(connection.execute_batch(
             "PRAGMA user_version=2; COMMIT; PRAGMA journal_mode=WAL; PRAGMA secure_delete=ON;",
@@ -257,76 +255,5 @@ impl Store {
             result.push((seq, received, raw));
         }
         Ok((result, self.revision(viewer, community)?))
-    }
-}
-
-#[cfg(test)]
-mod contention_tests {
-    use super::*;
-    use crate::{
-        archive::{execute, ArchiveHost, Request},
-        identity::{EventTemplate, IdentityHost},
-    };
-    use std::sync::{Arc, Mutex};
-
-    #[tokio::test]
-    async fn sqlite_wait_does_not_hold_identity_signing_lock() {
-        // A busy callback is the explicit barrier: signing starts only once the
-        // archive operation has entered SQLite and is blocked by another writer.
-        static BUSY: Mutex<Option<tokio::sync::oneshot::Sender<()>>> = Mutex::new(None);
-        static RELEASE: std::sync::Condvar = std::sync::Condvar::new();
-        static WAITING: Mutex<bool> = Mutex::new(false);
-        fn blocked(_: i32) -> bool {
-            let mut waiting = WAITING.lock().unwrap();
-            *waiting = true;
-            if let Some(sender) = BUSY.lock().unwrap().take() {
-                let _ = sender.send(());
-            }
-            while *waiting {
-                waiting = RELEASE.wait(waiting).unwrap();
-            }
-            false
-        }
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("busy.sqlite3");
-        let identity = IdentityHost::fixture();
-        let viewer = identity.viewer().await.unwrap();
-        let store = Store::open(path.clone()).unwrap();
-        store.seed(&viewer, "https://a.test").unwrap();
-        store.0.busy_handler(Some(blocked)).unwrap();
-        let blocker = Connection::open(&path).unwrap();
-        blocker.execute_batch("BEGIN IMMEDIATE").unwrap();
-        let (sender, entered) = tokio::sync::oneshot::channel();
-        *BUSY.lock().unwrap() = Some(sender);
-        let host = ArchiveHost(Arc::new(Mutex::new(Some(store))));
-        let other = identity.clone();
-        let work = tokio::spawn(async move {
-            execute(
-                &other,
-                host,
-                path,
-                "https://a.test".into(),
-                viewer,
-                Request::Settings,
-            )
-            .await
-        });
-        entered.await.unwrap();
-        let signed = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            identity.sign(EventTemplate {
-                kind: 1,
-                created_at: 1,
-                tags: vec![],
-                content: "independent signing".into(),
-            }),
-        )
-        .await;
-        // Always release before asserting, including when the old lock scope times out.
-        *WAITING.lock().unwrap() = false;
-        RELEASE.notify_one();
-        blocker.execute_batch("ROLLBACK").unwrap();
-        let _ = work.await.unwrap();
-        assert!(signed.expect("SQLite blocked identity signing").is_ok());
     }
 }
