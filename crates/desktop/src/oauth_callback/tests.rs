@@ -265,20 +265,11 @@ async fn abandoned_listener_expires_and_can_be_replaced() {
 }
 
 #[tokio::test]
-async fn main_document_reload_cancels_wait_and_allows_new_sign_in() {
-    use tauri::webview::PageLoadEvent::{Finished, Started};
-
-    // Async Tauri commands queue startup, allowing reload cleanup to overtake it.
-    let _: fn(_, _, _, _, _) -> Result<OAuthAttempt, String> =
-        oauth_callback_begin::<tauri::test::MockRuntime>;
+async fn abandon_cancels_wait_and_allows_new_sign_in() {
     let state = OAuthCallbackHost::default();
     let first = start(&state, options("/callback/old")).unwrap().id;
-    for (label, event) in [("browser-content", Started), ("main", Finished)] {
-        state.document_load(label, event).unwrap();
-        assert_eq!(state.0.lock().unwrap().as_ref().unwrap().id, first);
-    }
     let reload = async {
-        state.document_load("main", Started).unwrap();
+        state.abandon().unwrap();
         let attempt = begin(&state, "/callback/new".into()).unwrap();
         let next = attempt.id;
         let url = url::Url::parse(&attempt.callback_url).unwrap();
@@ -467,7 +458,7 @@ async fn launch_failure_cleans_up_but_cannot_cancel_a_replacement_after_reload()
     let mut next = None;
     assert_eq!(
         host.begin(options("/callback"), |_| {
-            host.document_load("main", tauri::webview::PageLoadEvent::Started)?;
+            host.abandon()?;
             next = Some(start(&host, options("/callback"))?);
             Err("private-launch-error".into())
         }),

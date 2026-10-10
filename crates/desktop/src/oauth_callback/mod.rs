@@ -1,9 +1,9 @@
 //! Browser sign-in startup and loopback OAuth authorization-code responses.
 //! RFC 8252 §§7.3, 8.3, 8.4, 8.9; RFC 6749 §§4.1.2, 4.1.2.1; RFC 9700 §2.1.
 //! See this folder's README.md for the command contract, ownership, and limits.
+//! The Tauri commands that the README describes wrap [`OAuthCallbackHost`].
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use std::{sync::Mutex, time::Duration};
-use tauri_plugin_opener::OpenerExt;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -11,22 +11,36 @@ use tokio::{
     task::JoinHandle,
 };
 
+/// The query parameters of an accepted callback.
 #[derive(Debug, PartialEq, serde::Serialize)]
-pub(crate) struct OAuthCallback {
-    // Preserve ordering and duplicates so the plugin can validate known parameters.
-    parameters: Vec<(String, String)>,
+pub struct OAuthCallback {
+    /// Decoded name/value pairs. Order and duplicates are kept so the plugin
+    /// can validate known parameters.
+    pub parameters: Vec<(String, String)>,
 }
+/// A started sign-in attempt.
 #[derive(Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OAuthAttempt {
-    id: String,
-    // Reuse this exact redirect_uri in token exchange (RFC 6749 §4.1.3).
-    callback_url: String,
+pub struct OAuthAttempt {
+    /// Lifecycle handle for [`OAuthCallbackHost::wait`] and
+    /// [`OAuthCallbackHost::cancel`]. It is not the OAuth state.
+    pub id: String,
+    /// The `redirect_uri` sent to the provider. Reuse this exact value in
+    /// token exchange (RFC 6749 §4.1.3).
+    pub callback_url: String,
 }
-struct OAuthRequest {
-    authorization_url: String,
-    callback_path: String,
-    use_state: Option<bool>,
+/// What the caller asks [`OAuthCallbackHost::begin`] to start.
+#[derive(Debug)]
+pub struct OAuthRequest {
+    /// The provider's HTTPS authorization URL, without `state` or
+    /// `redirect_uri`; the host adds both.
+    pub authorization_url: String,
+    /// The callback path registered with the provider, such as
+    /// `/oauth2redirect/provider`.
+    pub callback_path: String,
+    /// Whether the host adds and checks a state value. `None` means yes;
+    /// `Some(false)` is only for custom protocols that cannot carry one.
+    pub use_state: Option<bool>,
 }
 type CallbackResult = Result<OAuthCallback, String>;
 struct Attempt {
@@ -39,23 +53,22 @@ impl Drop for Attempt {
         self.task.abort();
     }
 }
+/// Owns the single pending sign-in attempt and its loopback listener.
 #[derive(Default)]
-pub(crate) struct OAuthCallbackHost(Mutex<Option<Attempt>>);
+pub struct OAuthCallbackHost(Mutex<Option<Attempt>>);
 
 impl OAuthCallbackHost {
-    pub(crate) fn document_load(
-        &self,
-        label: &str,
-        event: tauri::webview::PageLoadEvent,
-    ) -> Result<(), String> {
-        if label == "main" && event == tauri::webview::PageLoadEvent::Started {
-            // The new document cannot recover the previous plugin's attempt ID.
-            self.0.lock().map_err(|_| "Sign-in unavailable")?.take();
-        }
+    /// Drops the pending attempt, if any. Call this when the document that
+    /// started it unloads: a new document cannot recover its attempt ID.
+    pub fn abandon(&self) -> Result<(), String> {
+        self.0.lock().map_err(|_| "Sign-in unavailable")?.take();
         Ok(())
     }
 
-    fn begin(
+    /// Validates `request`, binds the loopback listener and calls `open` with
+    /// the full authorization URL. Must run inside a Tokio runtime, which
+    /// hosts the listener; nothing here awaits, so a `block_on` is enough.
+    pub fn begin(
         &self,
         request: OAuthRequest,
         open: impl FnOnce(&str) -> Result<(), String>,
@@ -148,7 +161,9 @@ impl OAuthCallbackHost {
         })
     }
 
-    async fn wait(&self, id: &str) -> CallbackResult {
+    /// Waits for the attempt's callback, then ends the attempt. Each attempt
+    /// result can be taken once.
+    pub async fn wait(&self, id: &str) -> Result<OAuthCallback, String> {
         let receiver = {
             let mut current = self.0.lock().map_err(|_| "Sign-in unavailable")?;
             current
@@ -164,53 +179,15 @@ impl OAuthCallbackHost {
         result
     }
 
-    fn cancel(&self, id: &str) -> Result<(), String> {
+    /// Ends the attempt if it is still the current one. A stale ID does not
+    /// cancel a newer attempt.
+    pub fn cancel(&self, id: &str) -> Result<(), String> {
         let mut current = self.0.lock().map_err(|_| "Sign-in unavailable")?;
         if current.as_ref().is_some_and(|attempt| attempt.id == id) {
             *current = None;
         }
         Ok(())
     }
-}
-
-#[tauri::command]
-pub(crate) fn oauth_callback_begin<R: tauri::Runtime>(
-    app: tauri::AppHandle<R>,
-    state: tauri::State<'_, OAuthCallbackHost>,
-    authorization_url: String,
-    callback_path: String,
-    use_state: Option<bool>,
-) -> Result<OAuthAttempt, String> {
-    // Register and launch inline so reload cleanup cannot overtake a queued begin.
-    // Enter the runtime for the Tokio listener; startup does not await anything.
-    tauri::async_runtime::block_on(async {
-        state.begin(
-            OAuthRequest {
-                authorization_url,
-                callback_path,
-                use_state,
-            },
-            |url| {
-                app.opener()
-                    .open_url(url, None::<&str>)
-                    .map_err(|_| "Could not open the sign-in browser".into())
-            },
-        )
-    })
-}
-#[tauri::command]
-pub(crate) async fn oauth_callback_wait(
-    state: tauri::State<'_, OAuthCallbackHost>,
-    id: String,
-) -> CallbackResult {
-    state.wait(&id).await
-}
-#[tauri::command]
-pub(crate) fn oauth_callback_cancel(
-    state: tauri::State<'_, OAuthCallbackHost>,
-    id: String,
-) -> Result<(), String> {
-    state.cancel(&id)
 }
 
 async fn receive_callback(
