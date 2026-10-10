@@ -54,7 +54,7 @@ use relay::{
 };
 mod terminal;
 #[cfg(test)]
-mod test_executable;
+use buzz_desktop::test_executable;
 use buzzodz_plugins::{
     imports::{prepare_folder, prepare_git, PreparedImport, Preview},
     Catalog, InstallationResult, Manager,
