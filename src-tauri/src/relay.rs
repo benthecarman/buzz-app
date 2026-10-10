@@ -9,7 +9,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use buzz_desktop::media;
 use buzz_desktop::relay::events::{template, validate_event, verify_signature, workflow_uuid};
 pub(crate) use buzz_desktop::relay::origin;
-use buzz_desktop::relay::{catalog, channel_writes as channel_policy};
+use buzz_desktop::relay::{catalog, channel_writes as channel_policy, project_git};
 use buzz_desktop::relay::{
     client, hex_key, read_bounded, send, RelayResponse, MAX_BODY, MAX_RESPONSE,
 };
@@ -27,8 +27,6 @@ mod reminders;
 pub(crate) use buzz_desktop::media::stream::MediaStream;
 pub(crate) use buzz_desktop::upload::{Spools, Uploads};
 pub(crate) use reminders::{relay_decode_reminders, relay_sign_reminder};
-mod project_git;
-pub(crate) use project_git::{relay_project_git, relay_project_git_cancel};
 type Result<T> = std::result::Result<T, String>;
 
 fn request_url(community: &str, path: &str, method: &str) -> Result<Url> {
@@ -550,6 +548,23 @@ pub(crate) fn media_stream_base<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> 
     use tauri::Manager as _;
     app.try_state::<MediaStream>()
         .map(|stream| stream.base().to_owned())
+}
+
+/// Packaged repository reads with the development broker's `project-git`
+/// contract; see `buzz_desktop::relay::project_git`.
+#[tauri::command]
+pub(crate) async fn relay_project_git(
+    host: tauri::State<'_, IdentityHost>,
+    community: String,
+    id: String,
+    read: project_git::GitRead,
+) -> Result<RelayResponse> {
+    project_git::read(host.inner(), &community, &id, read).await
+}
+
+#[tauri::command]
+pub(crate) fn relay_project_git_cancel(id: String) -> Result<()> {
+    project_git::cancel(&id)
 }
 
 #[cfg(test)]

@@ -1,9 +1,10 @@
 //! Packaged repository reads with the development broker's `project-git` contract
-//! (`browser-host/project-git.mjs`). IdentityHost signs the NIP-98 header; system Git reads into
+//! (`browser-host/project-git.mjs`). The [`Signer`] signs the NIP-98 header; system Git reads into
 //! an isolated bare repository that is removed after every outcome. No checkout, hooks,
 //! submodules, user Git configuration, arbitrary URL or write RPC.
-use super::{hex_key, origin, upload_id, RelayResponse, Result, Uploads};
-use crate::identity::{EventTemplate, IdentityHost};
+use super::{hex_key, origin, RelayResponse};
+use crate::event::{EventTemplate, Signer};
+use crate::upload::{upload_id, Uploads};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::{json, Value};
 #[cfg(unix)]
@@ -24,6 +25,8 @@ use tokio::{
     time::Instant,
 };
 
+type Result<T> = std::result::Result<T, String>;
+
 const READ_BYTES: usize = 4 * 1024 * 1024;
 const TEXT_BYTES: u64 = 1024 * 1024;
 /// Fetched objects are bounded separately: rendering limits apply only after ingestion.
@@ -39,13 +42,15 @@ fn cancels() -> &'static Uploads {
     CANCELS.get_or_init(Uploads::default)
 }
 
+/// One repository read: the repository's owner and `d` tag, and optionally
+/// a commit to show and a file to read.
 #[derive(serde::Deserialize, Debug, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct GitRead {
-    owner: String,
-    dtag: String,
-    commit: Option<String>,
-    path: Option<String>,
+pub struct GitRead {
+    pub owner: String,
+    pub dtag: String,
+    pub commit: Option<String>,
+    pub path: Option<String>,
 }
 
 fn git_hash(value: &str) -> bool {
@@ -96,39 +101,36 @@ fn failure(status: u16) -> RelayResponse {
     )
 }
 
-#[tauri::command]
-pub(crate) async fn relay_project_git(
-    host: tauri::State<'_, IdentityHost>,
-    community: String,
-    id: String,
+/// Reads a community repository into a fresh bare repository with system
+/// Git and returns the snapshot as a relay-shaped JSON response. `id` names
+/// the read for [`cancel`]; a cancelled read answers status 499.
+pub async fn read<S: Signer>(
+    host: &S,
+    community: &str,
+    id: &str,
     read: GitRead,
 ) -> Result<RelayResponse> {
     let read = parse_read(read)?;
-    let id = upload_id(Some(&id)).map_err(|_| "Invalid Git read")?;
-    let url = format!(
-        "{}git/{}/{}.git",
-        origin(&community)?,
-        read.owner,
-        read.dtag
-    );
+    let id = upload_id(Some(id)).map_err(|_| "Invalid Git read")?;
+    let url = format!("{}git/{}/{}.git", origin(community)?, read.owner, read.dtag);
     let Some(cancelled) = cancels()
         .start(id)
         .map_err(|_| "Repository reads are busy")?
     else {
         return Ok(failure(CANCELLED));
     };
-    let response = serve(&url, &read, cancelled, sign(host.inner(), &url)).await;
+    let response = serve(&url, &read, cancelled, sign(host, &url)).await;
     cancels().finish(id);
     response
 }
 
-#[tauri::command]
-pub(crate) fn relay_project_git_cancel(id: String) -> Result<()> {
-    cancels().cancel(upload_id(Some(&id)).map_err(|_| "Invalid Git read")?);
+/// Cancels read `id`, even if it has not started yet.
+pub fn cancel(id: &str) -> Result<()> {
+    cancels().cancel(upload_id(Some(id)).map_err(|_| "Invalid Git read")?);
     Ok(())
 }
 
-async fn sign(host: &IdentityHost, url: &str) -> Result<String> {
+async fn sign<S: Signer>(host: &S, url: &str) -> Result<String> {
     let auth = host
         .sign(EventTemplate {
             kind: 27235,
@@ -274,7 +276,7 @@ fn git_program_with_tools(
 
 #[cfg(not(target_os = "macos"))]
 fn git_program(path: &std::ffi::OsStr) -> Option<PathBuf> {
-    Some(crate::host_command::resolve_program("git", path))
+    Some(crate::process::resolve_program("git", path))
 }
 
 impl Git {
@@ -284,7 +286,7 @@ impl Git {
         let ceiling = directory
             .parent()
             .expect("temporary read directory has a parent");
-        let path = crate::host_command::effective_path();
+        let path = crate::process::effective_path();
         let settings = [
             ("http.extraHeader", header),
             ("http.followRedirects", "false"),
@@ -339,13 +341,13 @@ impl Git {
         #[cfg(unix)]
         command.as_std_mut().process_group(0);
         #[cfg(windows)]
-        let job = crate::host_command::windows_job::WindowsJob::new().ok_or(502u16)?;
+        let job = crate::process::windows_job::WindowsJob::new().ok_or(502u16)?;
         #[cfg(windows)]
         let mut child = job.spawn_hidden(&mut command).ok_or(502u16)?;
         #[cfg(not(windows))]
         let mut child = command.spawn().map_err(|_| 502u16)?;
         #[cfg(unix)]
-        let mut group = crate::host_command::ProcessGroupGuard {
+        let mut group = crate::process::ProcessGroupGuard {
             process_id: child.id().ok_or(502u16)? as i32,
             armed: true,
         };
