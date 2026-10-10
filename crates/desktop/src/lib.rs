@@ -15,5 +15,6 @@ pub mod test_executable;
 #[cfg(test)]
 mod test_support;
 pub mod upload;
+pub mod window_state;
 
 pub use event::{EventTemplate, Signer};
