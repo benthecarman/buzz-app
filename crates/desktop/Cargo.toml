@@ -8,6 +8,7 @@ rust-version = "1.77.2"
 
 [dependencies]
 base64 = "0.22"
+buzz-agent = { git = "https://github.com/block/buzz.git", rev = "4f51b9e1010e086a16c099cd8d8218ca974a5e18" }
 buzz-agent-controller = { path = "../agent-controller" }
 bytes = "1"
 futures-util = "0.3"

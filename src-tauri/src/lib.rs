@@ -17,7 +17,6 @@ use browser::{
 mod agent_models;
 mod agents;
 mod app_agents;
-mod codex_models;
 mod deep_links;
 mod dock;
 #[cfg(test)]

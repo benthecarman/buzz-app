@@ -680,6 +680,7 @@ name = "buzz-desktop"
 version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
+ "buzz-agent",
  "buzz-agent-controller",
  "bytes",
  "fs2",
