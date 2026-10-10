@@ -8,6 +8,7 @@ pub mod event;
 pub mod media;
 pub mod process;
 pub mod relay;
+pub mod terminal;
 #[doc(hidden)]
 pub mod test_executable;
 #[cfg(test)]

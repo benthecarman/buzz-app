@@ -4,11 +4,17 @@ use uuid::Uuid;
 /// Public presentation context, captured once when the shell starts. Never credentials.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct TerminalContext {
+pub struct TerminalContext {
+    /// Channel UUID, exported as `BUZZ_CHANNEL_ID`.
     pub channel_id: String,
+    /// Channel name, exported as `BUZZ_CHANNEL` when it is plain enough to
+    /// show; the channel ID replaces it otherwise.
     pub channel_name: String,
+    /// Optional 64-hex thread event ID, exported as `BUZZ_THREAD_ID`.
     pub thread_id: Option<String>,
+    /// The user's public key, exported as `BUZZ_NPUB`.
     pub npub: String,
+    /// Credential-free ws/wss relay URL, exported as `BUZZ_RELAY_URL`.
     pub relay_url: String,
 }
 
