@@ -141,3 +141,12 @@ pub(crate) fn assert_strict(event: &serde_json::Value, verb: &str, server: &str)
     assert_eq!(tag(event, "expiration").len(), 1);
     assert_eq!(expiration, event["created_at"].as_u64().unwrap() + 60);
 }
+
+/// Runs a future to completion on a fresh current-thread runtime.
+pub(crate) fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}

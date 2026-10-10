@@ -1,6 +1,11 @@
 //! Authenticated HTTP to a Buzz relay: NIP-98 requests and Blossom tokens.
 //! Credentials stay with the [`Signer`]; redirects never carry auth.
 pub mod agent;
+pub mod catalog;
+pub mod channel_writes;
+pub mod events;
+pub mod kit;
+pub mod reminders;
 
 use crate::event::{EventTemplate, Signer};
 use base64::{engine::general_purpose::STANDARD, Engine};
