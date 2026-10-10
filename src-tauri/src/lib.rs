@@ -628,7 +628,10 @@ pub fn run() {
             });
             // Relay `<video>` and `<audio>` load from this listener; without it
             // they show as unavailable.
-            match relay::MediaStream::start(app.state::<IdentityHost>().inner().clone()) {
+            match relay::MediaStream::start(
+                app.state::<IdentityHost>().inner().clone(),
+                tauri::async_runtime::handle().inner(),
+            ) {
                 Ok(stream) => {
                     app.manage(stream);
                 }

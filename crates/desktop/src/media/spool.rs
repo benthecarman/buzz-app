@@ -38,7 +38,7 @@ const ADMIT: Duration = Duration::from_secs(5);
 static ADMITTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// Upstream bytes are written in batches of this size, bounding the memory one
 /// download holds.
-const BATCH: usize = super::media_blocks::BLOCK as usize;
+const BATCH: usize = super::blocks::BLOCK as usize;
 /// How long an unheld spool is kept, such as for a player that paused and
 /// closed its connection, or between a player's reads.
 #[cfg(not(test))]
@@ -67,7 +67,7 @@ pub(super) struct Spool {
     file: Arc<SpoolFile>,
     /// The upstream `Content-Length`, when it sent one.
     total: Option<u64>,
-    headers: tauri::http::HeaderMap,
+    headers: http::HeaderMap,
     progress: watch::Receiver<Progress>,
     usage: Arc<Usage>,
     stop: CancellationToken,
@@ -195,7 +195,7 @@ pub(super) async fn open(
         stop: stop.clone(),
     });
     spools.push_back((url.clone(), spool.clone()));
-    tauri::async_runtime::spawn(download(file, upstream, limit, total, sender, usage, stop));
+    tokio::spawn(download(file, upstream, limit, total, sender, usage, stop));
     Ok(spool)
 }
 
@@ -272,12 +272,10 @@ async fn copy(
         }
         if batch.len() >= BATCH || (chunk.is_none() && !batch.is_empty()) {
             let (file, at) = (file.clone(), written);
-            batch = tauri::async_runtime::spawn_blocking(move || {
-                file.write_at(&batch, at).map(|()| batch)
-            })
-            .await
-            .map_err(|_| 500u16)?
-            .map_err(|_| 500u16)?;
+            batch = tokio::task::spawn_blocking(move || file.write_at(&batch, at).map(|()| batch))
+                .await
+                .map_err(|_| 500u16)?
+                .map_err(|_| 500u16)?;
             written += batch.len() as u64;
             batch.clear();
             progress.send_replace(Progress::Writing(written));
@@ -294,7 +292,7 @@ pub(super) async fn read(
     spool: Arc<Spool>,
     start: u64,
     end: u64,
-) -> std::result::Result<tauri::http::Response<Vec<u8>>, u16> {
+) -> std::result::Result<http::Response<Vec<u8>>, u16> {
     if spool.total.is_some_and(|total| start >= total) {
         return Err(416);
     }
@@ -321,14 +319,14 @@ pub(super) async fn read(
     }
     let last = end.min(total - 1);
     let file = spool.file.clone();
-    let body = tauri::async_runtime::spawn_blocking(move || {
+    let body = tokio::task::spawn_blocking(move || {
         let mut body = vec![0; (last - start + 1) as usize];
         file.read_at(&mut body, start).map(|()| body)
     })
     .await
     .map_err(|_| 500u16)?
     .map_err(|_| 500u16)?;
-    let mut response = tauri::http::Response::builder().status(206);
+    let mut response = http::Response::builder().status(206);
     for (name, value) in &spool.headers {
         response = response.header(name, value);
     }

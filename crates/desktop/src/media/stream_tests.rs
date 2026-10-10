@@ -1,9 +1,10 @@
 use super::*;
-use crate::relay::tests::{
+use crate::media::tests::{
     hung_up, media_blob, media_response, ranged_media_server, spool_files_deleted,
     spool_files_reach, whole_media_server, SPOOL_TESTS,
 };
-use crate::relay::{media_blocks::BLOCK, media_spool};
+use crate::media::{blocks::BLOCK, spool as media_spool};
+use crate::test_support::TestSigner;
 use std::io::{Read as _, Write as _};
 
 /// Any URL, so the fixture origins may be plain loopback HTTP.
@@ -12,7 +13,7 @@ fn any_url(target: &str) -> Option<Url> {
 }
 
 fn stream() -> MediaStream {
-    MediaStream::serve(IdentityHost::fixture(), any_url).unwrap()
+    MediaStream::serve(TestSigner, any_url, &tokio::runtime::Handle::current()).unwrap()
 }
 
 /// The listener's authority and the request target for `url`.
@@ -139,7 +140,8 @@ async fn requests_need_the_token_the_bound_host_and_the_app_origin() {
         }
     }
     // The real validator still applies: never an arbitrary URL.
-    let strict = MediaStream::serve(IdentityHost::fixture(), media_url).unwrap();
+    let strict =
+        MediaStream::serve(TestSigner, media_url, &tokio::runtime::Handle::current()).unwrap();
     assert_eq!(get(&strict, &url, "").await.status, 403);
 }
 

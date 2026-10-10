@@ -23,8 +23,8 @@
 //!   player's connection to the same URL keeps its own hold, and an unheld
 //!   spool expires after `media_spool`'s idle time.
 
-use super::{media_blocks, media_spool, media_url, WHOLE_VIDEO_MAX};
-use crate::identity::IdentityHost;
+use super::{blocks as media_blocks, media_url, spool as media_spool, WHOLE_VIDEO_MAX};
+use crate::event::Signer;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use tokio::{
@@ -52,7 +52,7 @@ fn app_origin(origin: &str) -> bool {
 }
 
 /// The running listener; dropping it stops the listener and its connections.
-pub(crate) struct MediaStream {
+pub struct MediaStream {
     base: String,
     stop: CancellationToken,
 }
@@ -64,12 +64,18 @@ impl Drop for MediaStream {
 }
 
 impl MediaStream {
-    pub(crate) fn start(host: IdentityHost) -> std::io::Result<Self> {
-        Self::serve(host, media_url)
+    /// Binds the listener and starts serving on `runtime`. Binding is
+    /// synchronous, so the address is known before any page loads.
+    pub fn start<S: Signer>(host: S, runtime: &tokio::runtime::Handle) -> std::io::Result<Self> {
+        Self::serve(host, media_url, runtime)
     }
 
     /// `target` validates the decoded relay URL; it is `media_url` outside tests.
-    fn serve(host: IdentityHost, target: fn(&str) -> Option<Url>) -> std::io::Result<Self> {
+    fn serve<S: Signer>(
+        host: S,
+        target: fn(&str) -> Option<Url>,
+        runtime: &tokio::runtime::Handle,
+    ) -> std::io::Result<Self> {
         // Bound synchronously, so the address is known before any page loads.
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         listener.set_nonblocking(true)?;
@@ -85,35 +91,29 @@ impl MediaStream {
             token,
             target,
         });
-        tauri::async_runtime::spawn(accept(listener, server, stop.clone()));
+        runtime.spawn(accept(listener, server, stop.clone()));
         Ok(Self { base, stop })
     }
 
     /// `http://127.0.0.1:<port>/<token>/`, to which the page appends the
     /// encoded relay URL of a `buzz-media` source.
-    pub(crate) fn base(&self) -> &str {
+    pub fn base(&self) -> &str {
         &self.base
     }
 }
 
-/// Where media elements load relay media; `None` if the listener could not
-/// start, and they show relay video and audio as unavailable. They never
-/// fall back to `buzz-media`, whose reads a closed player cannot cancel.
-#[tauri::command]
-pub(crate) fn media_stream_base<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Option<String> {
-    use tauri::Manager as _;
-    app.try_state::<MediaStream>()
-        .map(|stream| stream.base().to_owned())
-}
-
-struct Server {
-    host: IdentityHost,
+struct Server<S> {
+    host: S,
     authority: String,
     token: String,
     target: fn(&str) -> Option<Url>,
 }
 
-async fn accept(listener: std::net::TcpListener, server: Arc<Server>, stop: CancellationToken) {
+async fn accept<S: Signer>(
+    listener: std::net::TcpListener,
+    server: Arc<Server<S>>,
+    stop: CancellationToken,
+) {
     let Ok(listener) = TcpListener::from_std(listener) else {
         return;
     };
@@ -138,7 +138,7 @@ async fn accept(listener: std::net::TcpListener, server: Arc<Server>, stop: Canc
             continue;
         };
         let (server, stop) = (server.clone(), stop.clone());
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             tokio::select! {
                 () = connection(&server, socket) => {}
                 () = stop.cancelled() => {}
@@ -148,7 +148,7 @@ async fn accept(listener: std::net::TcpListener, server: Arc<Server>, stop: Canc
     }
 }
 
-async fn connection(server: &Server, socket: TcpStream) {
+async fn connection<S: Signer>(server: &Server<S>, socket: TcpStream) {
     let (mut reader, mut writer) = socket.into_split();
     let Ok(Some(head)) = tokio::time::timeout(HEAD_TIMEOUT, read_head(&mut reader)).await else {
         return;
@@ -216,7 +216,7 @@ struct Request {
     range: Option<Range>,
 }
 
-fn parse(server: &Server, head: &[u8]) -> std::result::Result<Request, u16> {
+fn parse<S>(server: &Server<S>, head: &[u8]) -> std::result::Result<Request, u16> {
     let text = std::str::from_utf8(head).map_err(|_| 400u16)?;
     let mut lines = text.split("\r\n");
     let mut first = lines.next().unwrap_or_default().split(' ');
@@ -295,15 +295,15 @@ fn byte_range(value: &str) -> Option<Range> {
 /// buffered 200 an upstream sent instead for something other than video.
 enum Part {
     Range(Vec<u8>, u64),
-    Whole(tauri::http::Response<Vec<u8>>),
+    Whole(http::Response<Vec<u8>>),
 }
 
-async fn read(
-    server: &Server,
+async fn read<S: Signer>(
+    server: &Server<S>,
     url: &Url,
     start: u64,
     end: u64,
-) -> std::result::Result<(Part, tauri::http::HeaderMap), u16> {
+) -> std::result::Result<(Part, http::HeaderMap), u16> {
     let end = end.min(start.saturating_add(media_blocks::BLOCK - 1));
     let response = media_blocks::read(&server.host, url, start, end, WHOLE_VIDEO_MAX).await?;
     if response.status() != 206 {
@@ -321,8 +321,8 @@ async fn read(
     Ok((Part::Range(body, total), parts.headers))
 }
 
-async fn respond(
-    server: &Server,
+async fn respond<S: Signer>(
+    server: &Server<S>,
     writer: &mut OwnedWriteHalf,
     request: Request,
 ) -> std::io::Result<()> {
@@ -399,7 +399,7 @@ async fn respond(
 /// that ignored `Range`.
 async fn write_whole(
     writer: &mut OwnedWriteHalf,
-    response: tauri::http::Response<Vec<u8>>,
+    response: http::Response<Vec<u8>>,
     head_only: bool,
 ) -> std::io::Result<()> {
     let mut head = status_line(response.status().as_u16());
@@ -436,7 +436,7 @@ async fn write_status(
 }
 
 fn status_line(status: u16) -> String {
-    let reason = tauri::http::StatusCode::from_u16(status)
+    let reason = http::StatusCode::from_u16(status)
         .ok()
         .and_then(|status| status.canonical_reason())
         .unwrap_or_default();
@@ -444,5 +444,5 @@ fn status_line(status: u16) -> String {
 }
 
 #[cfg(test)]
-#[path = "media_stream_tests.rs"]
+#[path = "stream_tests.rs"]
 mod tests;

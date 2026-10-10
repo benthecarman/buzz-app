@@ -6,8 +6,8 @@
 //! frame for many seconds. Each aligned block is one signed `Range` GET, shared
 //! by every read and player of the same URL.
 
-use super::{buffer_media, media_spool, send_media, upstream_type};
-use crate::identity::IdentityHost;
+use super::{buffer_media, send_media, spool as media_spool, upstream_type};
+use crate::event::Signer;
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
@@ -15,7 +15,7 @@ use std::{
 use tokio::sync::OnceCell;
 use url::Url;
 
-pub(super) const BLOCK: u64 = 1024 * 1024;
+pub(crate) const BLOCK: u64 = 1024 * 1024;
 /// Retains at most 32 blocks (32 MiB); a reader still holding an evicted block
 /// keeps it until it finishes. Identity never changes within a process, and the
 /// webview may already keep these bytes under `Cache-Control: private, max-age=3600`.
@@ -24,7 +24,7 @@ const CAPACITY: usize = 32;
 struct Block {
     start: u64,
     total: u64,
-    headers: tauri::http::HeaderMap,
+    headers: http::HeaderMap,
     bytes: Vec<u8>,
 }
 
@@ -52,7 +52,7 @@ fn slot(url: &Url, index: u64) -> Slot {
 }
 
 /// `bytes START-END/TOTAL`, the only form a 206 to a single range carries.
-pub(super) fn content_range(value: &str) -> Option<(u64, u64, u64)> {
+pub(crate) fn content_range(value: &str) -> Option<(u64, u64, u64)> {
     let (range, total) = value.strip_prefix("bytes ")?.split_once('/')?;
     let (start, end) = range.split_once('-')?;
     Some((start.parse().ok()?, end.parse().ok()?, total.parse().ok()?))
@@ -63,13 +63,13 @@ enum Uncached {
     Status(u16),
     /// The upstream ignored `Range` for something other than video: its bounded
     /// 200 goes to the player as is.
-    Whole(Box<tauri::http::Response<Vec<u8>>>),
+    Whole(Box<http::Response<Vec<u8>>>),
     /// The upstream ignored `Range` for a video, which is spooled to disk.
     Video(Box<reqwest::Response>),
 }
 
-async fn fetch_block(
-    host: &IdentityHost,
+async fn fetch_block<S: Signer>(
+    host: &S,
     url: &Url,
     index: u64,
 ) -> std::result::Result<Arc<Block>, Uncached> {
@@ -113,13 +113,13 @@ async fn fetch_block(
 /// Answers `bytes=START-END` (already bounded by `media_range`) exactly, ending
 /// early only at the end of the blob, or with an upstream 200 that ignored `Range`.
 /// A video sent whole is spooled to disk, up to `video_limit` bytes.
-pub(super) async fn read(
-    host: &IdentityHost,
+pub(crate) async fn read<S: Signer>(
+    host: &S,
     url: &Url,
     start: u64,
     end: u64,
     video_limit: u64,
-) -> std::result::Result<tauri::http::Response<Vec<u8>>, u16> {
+) -> std::result::Result<http::Response<Vec<u8>>, u16> {
     if let Some(spool) = media_spool::cached(url) {
         return media_spool::read(spool, start, end).await;
     }
@@ -158,7 +158,7 @@ pub(super) async fn read(
         }
         first.get_or_insert(block);
     };
-    let mut response = tauri::http::Response::builder().status(206);
+    let mut response = http::Response::builder().status(206);
     for (name, value) in &first.headers {
         if name != "content-range" {
             response = response.header(name, value);
