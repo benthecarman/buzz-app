@@ -566,7 +566,11 @@ pub fn run() {
     let context = app_context();
     // A pending Sign out finishes before any window, webview storage, service or
     // identity read; if it can't, Buzz explains and exits without opening.
-    let instance = sign_out::Paths::resolve(&context.config().identifier).map(|paths| {
+    let instance = sign_out::Paths::resolve(
+        &context.config().identifier,
+        buzz_credential_store::HUMAN_SERVICE,
+    )
+    .map(|paths| {
         sign_out::boot(
             &paths,
             |registry| {
