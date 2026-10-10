@@ -14,14 +14,21 @@ use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 const SLOTS: usize = 4;
 const IDLE: Duration = Duration::from_secs(60);
 
-pub(super) struct Spool {
-    // Files and the resource permit live through conversion and upstream sending.
-    pub directory: tempfile::TempDir,
-    pub size: usize,
-    pub hash: String,
+/// One received upload on disk. Its files and resource permit live through
+/// conversion and upstream sending, and are removed when it drops.
+pub struct Spool {
+    pub(crate) directory: tempfile::TempDir,
+    pub(crate) size: usize,
+    pub(crate) hash: String,
     _slot: OwnedSemaphorePermit,
 }
 impl Spool {
+    /// The SHA-256 of the received bytes, in lowercase hex.
+    pub fn hash(&self) -> &str {
+        &self.hash
+    }
+
+    /// The received (unconverted) file.
     pub fn source(&self) -> PathBuf {
         self.directory.path().join("source")
     }
@@ -42,14 +49,16 @@ struct Root {
     directory: tempfile::TempDir,
 }
 
-pub(crate) struct Spools {
+/// Upload files being received, under one owned, locked temporary root.
+/// Leftovers of earlier sessions are removed when no live process owns them.
+pub struct Spools {
     receiving: Mutex<HashMap<String, Entry>>,
     slots: Arc<Semaphore>,
     parent: Result<PathBuf>,
     root: Mutex<Option<Root>>,
 }
 
-pub(super) fn private_tempdir_in(parent: &Path) -> std::io::Result<tempfile::TempDir> {
+pub(crate) fn private_tempdir_in(parent: &Path) -> std::io::Result<tempfile::TempDir> {
     let mut builder = tempfile::Builder::new();
     builder.prefix("upload-");
     #[cfg(unix)]
@@ -111,7 +120,9 @@ fn root(parent: &Path) -> std::io::Result<Root> {
 }
 
 impl Spools {
-    pub(crate) fn new(parent: Result<PathBuf>) -> Self {
+    /// Spools under `parent`, such as the app cache directory; an error is
+    /// reported by each upload that needs the directory.
+    pub fn new(parent: Result<PathBuf>) -> Self {
         let initial_root = parent.as_ref().ok().and_then(|path| root(path).ok());
         Self {
             receiving: Mutex::new(HashMap::new()),
@@ -146,7 +157,8 @@ impl Spools {
         };
         drop(removed);
     }
-    pub(super) fn begin(&self, uploads: &Uploads, id: &str, size: usize) -> Result<()> {
+    /// Reserves storage for upload `id` of `size` bytes.
+    pub fn begin(&self, uploads: &Uploads, id: &str, size: usize) -> Result<()> {
         upload_id(Some(id))?;
         validate_upload_size(size)?;
         let slot = self
@@ -224,7 +236,8 @@ impl Spools {
         }
         result
     }
-    pub(super) fn append(&self, id: &str, offset: usize, bytes: &[u8]) -> Result<()> {
+    /// Appends the chunk at `offset`; any failure discards the upload.
+    pub fn append(&self, id: &str, offset: usize, bytes: &[u8]) -> Result<()> {
         let entry = self.entry(id)?;
         let mut receiving = entry
             .lock()
@@ -259,7 +272,8 @@ impl Spools {
         }
         result
     }
-    pub(super) fn take(&self, id: &str) -> Result<(Spool, oneshot::Receiver<()>)> {
+    /// The complete spool and its cancellation, removed from receiving.
+    pub fn take(&self, id: &str) -> Result<(Spool, oneshot::Receiver<()>)> {
         let entry = self.lock().remove(id).ok_or("Upload cancelled")?;
         let mut entry = entry
             .lock()
@@ -277,11 +291,13 @@ impl Spools {
         drop(entry.file);
         Ok((entry.spool, entry.cancelled))
     }
-    pub(super) fn discard(&self, id: &str) {
+    /// Drops whatever remains of upload `id`.
+    pub fn discard(&self, id: &str) {
         let removed = self.lock().remove(id);
         drop(removed);
     }
-    pub(super) fn cancel(&self, uploads: &Uploads, id: &str) {
+    /// Cancels upload `id`, received or still running.
+    pub fn cancel(&self, uploads: &Uploads, id: &str) {
         // Registration and cancellation share the map lock. A begin that arrives
         // afterward consumes the pending cancel; an existing owner is signalled
         // before its receiving entry is removed.
@@ -292,7 +308,8 @@ impl Spools {
         };
         drop(removed);
     }
-    pub(crate) fn cancel_all(&self, uploads: &Uploads) {
+    /// Cancels every upload, such as when the window closes.
+    pub fn cancel_all(&self, uploads: &Uploads) {
         let removed = {
             let mut entries = self.lock();
             uploads.cancel_all();
@@ -300,7 +317,8 @@ impl Spools {
         };
         drop(removed);
     }
-    pub(crate) fn reap(&self, uploads: &Uploads) {
+    /// Cancels uploads that received nothing for a minute. Call periodically.
+    pub fn reap(&self, uploads: &Uploads) {
         let entries: Vec<_> = self
             .lock()
             .iter()
@@ -336,7 +354,7 @@ impl Spools {
     }
 }
 
-pub(super) fn hash_file(path: &Path) -> Result<(usize, String)> {
+pub(crate) fn hash_file(path: &Path) -> Result<(usize, String)> {
     let mut file =
         File::open(path).map_err(|_| "Media preparation could not access temporary storage")?;
     let mut hash = Sha256::new();

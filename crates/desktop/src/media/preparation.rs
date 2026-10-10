@@ -15,7 +15,7 @@ const MAX_IMAGE: u64 = 50 * 1024 * 1024;
 const MAX_VIDEO: u64 = 500 * 1024 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
-pub(super) enum PreparationError {
+pub(crate) enum PreparationError {
     Size,
     Capacity,
     Ffmpeg,
@@ -26,7 +26,7 @@ pub(super) enum PreparationError {
 }
 
 impl PreparationError {
-    pub(super) fn code(&self) -> &'static str {
+    pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::Size => "size",
             Self::Capacity => "capacity",
@@ -38,7 +38,7 @@ impl PreparationError {
         }
     }
 
-    pub(super) fn status(&self) -> u16 {
+    pub(crate) fn status(&self) -> u16 {
         match self {
             Self::Size => 413,
             Self::Capacity => 429,
@@ -79,7 +79,7 @@ fn allowed_mode(mode: &str, size: usize) -> Option<(&'static str, bool, bool)> {
 }
 
 fn ffmpeg_command(program: &Path) -> Command {
-    let path = crate::host_command::effective_path();
+    let path = crate::process::effective_path();
     let mut cmd = Command::new(program);
     cmd.env_clear().env("PATH", path).env("LANG", "C");
     #[cfg(windows)]
@@ -189,28 +189,27 @@ fn output_size(path: &Path, limit: u64) -> Result<(), &'static str> {
 }
 
 #[cfg(test)]
-use super::upload_spool::private_tempdir_in;
+use crate::upload::spool::private_tempdir_in;
 
-pub(super) async fn prepare_file(
+pub(crate) async fn prepare_file(
     source: &Path,
     size: usize,
     directory: &Path,
     mode: &str,
     cancelled: &mut oneshot::Receiver<()>,
 ) -> Result<(std::path::PathBuf, &'static str), PreparationError> {
-    let path = crate::host_command::effective_path();
-    let program = crate::host_command::resolve_program("ffmpeg", &path);
+    let path = crate::process::effective_path();
+    let program = crate::process::resolve_program("ffmpeg", &path);
     prepare_file_with_program(source, size, directory, mode, cancelled, &program).await
 }
 
 #[cfg(test)]
-pub(super) async fn prepare(
+pub(crate) async fn prepare(
     body: Vec<u8>,
     mode: &str,
     cancelled: &mut oneshot::Receiver<()>,
 ) -> Result<(Vec<u8>, &'static str), PreparationError> {
-    let program =
-        crate::host_command::resolve_program("ffmpeg", &crate::host_command::effective_path());
+    let program = crate::process::resolve_program("ffmpeg", &crate::process::effective_path());
     prepare_with_program(body, mode, cancelled, &program).await
 }
 
@@ -373,8 +372,7 @@ mod tests {
     // conversion tests return early when the required tools are unavailable.
     // Installed tools must still succeed; conversion failures are not skipped.
     fn media_tool_version(name: &str) -> Option<Vec<u8>> {
-        let program =
-            crate::host_command::resolve_program(name, &crate::host_command::effective_path());
+        let program = crate::process::resolve_program(name, &crate::process::effective_path());
         match std::process::Command::new(program).arg("-version").output() {
             Ok(output) => {
                 assert!(output.status.success(), "{name} version check failed");
@@ -415,9 +413,9 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("sample.avi");
-        let generated = std::process::Command::new(crate::host_command::resolve_program(
+        let generated = std::process::Command::new(crate::process::resolve_program(
             "ffmpeg",
-            &crate::host_command::effective_path(),
+            &crate::process::effective_path(),
         ))
         .args([
             "-y",
@@ -456,9 +454,9 @@ mod tests {
         }
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("sample.mov");
-        let generated = std::process::Command::new(crate::host_command::resolve_program(
+        let generated = std::process::Command::new(crate::process::resolve_program(
             "ffmpeg",
-            &crate::host_command::effective_path(),
+            &crate::process::effective_path(),
         ))
         .args([
             "-y",
@@ -502,16 +500,16 @@ mod tests {
         if media_tool_version("ffprobe").is_none() {
             return;
         }
-        let bytes = include_bytes!("../../../tests/fixtures/media/tiled.heic").to_vec();
+        let bytes = include_bytes!("../../../../tests/fixtures/media/tiled.heic").to_vec();
         let (_sender, mut cancelled) = oneshot::channel();
         let (prepared, mime) = prepare(bytes, "image:mov", &mut cancelled).await.unwrap();
         assert_eq!(mime, "image/jpeg");
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("prepared.jpg");
         std::fs::write(&output, prepared).unwrap();
-        let dimensions = std::process::Command::new(crate::host_command::resolve_program(
+        let dimensions = std::process::Command::new(crate::process::resolve_program(
             "ffprobe",
-            &crate::host_command::effective_path(),
+            &crate::process::effective_path(),
         ))
         .args([
             "-v",
@@ -633,7 +631,7 @@ mod tests {
         // Any invocation beyond the version probe is a test failure.
         crate::test_executable::write_executable(&program, "#!/bin/sh\nif [ \"$1\" = -version ]; then printf 'ffmpeg version 7.1.4 Copyright'; else exit 99; fi\n");
         let (_sender, mut cancelled) = oneshot::channel();
-        let bytes = include_bytes!("../../../tests/fixtures/media/tiled.heic").to_vec();
+        let bytes = include_bytes!("../../../../tests/fixtures/media/tiled.heic").to_vec();
         assert_eq!(
             prepare_with_program(bytes, "image:mov", &mut cancelled, &program).await,
             Err(PreparationError::Ffmpeg)
