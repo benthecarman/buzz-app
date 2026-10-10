@@ -1,8 +1,6 @@
 use crate::{with_manager, PluginManager};
 #[cfg(windows)]
 pub(crate) use buzz_desktop::process::windows_job;
-#[cfg(unix)]
-pub(crate) use buzz_desktop::process::ProcessGroupGuard;
 pub(crate) use buzz_desktop::process::{effective_path, resolve_program, run_output};
 use buzzodz_plugins::{
     HostCommand, DEFAULT_HOST_COMMAND_OUTPUT_BYTES, MAX_HOST_COMMAND_OUTPUT_BYTES,

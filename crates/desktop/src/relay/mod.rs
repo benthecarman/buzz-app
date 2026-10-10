@@ -5,6 +5,7 @@ pub mod catalog;
 pub mod channel_writes;
 pub mod events;
 pub mod kit;
+pub mod project_git;
 pub mod reminders;
 
 use crate::event::{EventTemplate, Signer};
