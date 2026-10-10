@@ -1,12 +1,15 @@
 //! Native terminal capability. Owner IDs are lifecycle fences, not a plugin sandbox.
 //! No remote shell endpoint, signing capability or inherited host credentials.
+//!
+//! Every [`Terminals`] method may block on process teardown, so async callers
+//! should run them on a blocking thread.
 mod context;
 #[cfg(all(test, unix))]
 mod tests;
 #[cfg(unix)]
 mod unix;
 
-pub(crate) use context::TerminalContext;
+pub use context::TerminalContext;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -16,13 +19,19 @@ const MAX_OWNERS: usize = 32;
 #[cfg(unix)]
 const MAX_SESSIONS: usize = 20;
 #[cfg(unix)]
-pub(super) const MAX_BYTES: usize = 64 * 1024;
-pub(super) const MAX_PENDING_INPUT: usize = 1024 * 1024;
+const MAX_BYTES: usize = 64 * 1024;
+/// Largest input a session queues for the shell. Callers can reject bigger
+/// writes early, before moving them to a blocking thread.
+pub const MAX_PENDING_INPUT: usize = 1024 * 1024;
+const UNSUPPORTED: &str = "Local terminals require macOS or Linux";
 
-#[derive(Serialize)]
-pub(crate) struct ReadResult {
-    data: Vec<u8>,
-    exited: bool,
+/// Output drained by one [`Terminals::read`], capped at 64 KiB per call.
+#[derive(Debug, Serialize)]
+pub struct ReadResult {
+    /// Raw PTY bytes, not necessarily ending on a UTF-8 boundary.
+    pub data: Vec<u8>,
+    /// Set once all output is drained and the shell has exited.
+    pub exited: bool,
 }
 
 #[cfg(unix)]
@@ -42,8 +51,9 @@ struct Owner {
     sessions: HashMap<String, Session>,
 }
 
+/// Registry of PTY sessions grouped by owner. Clones share one registry.
 #[derive(Clone, Default)]
-pub(crate) struct Terminals(Arc<Mutex<Registry>>);
+pub struct Terminals(Arc<Mutex<Registry>>);
 impl Terminals {
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Registry>, String> {
         self.0
@@ -51,9 +61,11 @@ impl Terminals {
             .map_err(|_| "Terminal registry unavailable".into())
     }
 
-    fn create_owner(&self) -> Result<String, String> {
+    /// Registers an owner, such as one plugin view, and returns its ID.
+    /// [`Terminals::close_owner`] later ends all of its sessions at once.
+    pub fn create_owner(&self) -> Result<String, String> {
         if !cfg!(unix) {
-            return Err("Local terminals require macOS or Linux".into());
+            return Err(UNSUPPORTED.into());
         }
         let mut state = self.lock()?;
         if state.stopped {
@@ -67,7 +79,9 @@ impl Terminals {
         Ok(id)
     }
 
-    fn spawn(
+    /// Starts the user's login shell for `owner` with only `context` and a
+    /// fixed environment, and returns the session ID.
+    pub fn spawn(
         &self,
         owner: &str,
         context: TerminalContext,
@@ -83,7 +97,48 @@ impl Terminals {
         #[cfg(not(unix))]
         {
             let _ = owner;
-            Err("Local terminals require macOS or Linux".into())
+            Err(UNSUPPORTED.into())
+        }
+    }
+
+    /// Flushes queued input, then drains the output that is ready without
+    /// blocking.
+    pub fn read(&self, owner: &str, id: &str) -> Result<ReadResult, String> {
+        #[cfg(unix)]
+        {
+            self.with_session(owner, id, Session::read)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (owner, id);
+            Err(UNSUPPORTED.into())
+        }
+    }
+
+    /// Queues `data` for the shell and writes as much as it accepts now.
+    /// [`Terminals::read`] flushes the rest.
+    pub fn write(&self, owner: &str, id: &str, data: &[u8]) -> Result<(), String> {
+        #[cfg(unix)]
+        {
+            self.with_session(owner, id, |session| session.write(data))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (owner, id, data);
+            Err(UNSUPPORTED.into())
+        }
+    }
+
+    /// Resizes the session's PTY, which signals the shell with SIGWINCH.
+    pub fn resize(&self, owner: &str, id: &str, cols: u16, rows: u16) -> Result<(), String> {
+        #[cfg(unix)]
+        {
+            self.with_session(owner, id, |session| session.resize(cols, rows))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = (owner, id, cols, rows);
+            Err(UNSUPPORTED.into())
         }
     }
 
@@ -140,7 +195,8 @@ impl Terminals {
         run(session)
     }
 
-    fn close(&self, owner: &str, id: &str) -> Result<(), String> {
+    /// Terminates one session and its process groups. Unknown IDs succeed.
+    pub fn close(&self, owner: &str, id: &str) -> Result<(), String> {
         let mut state = self.lock()?;
         if let Some(owner) = state.owners.get_mut(owner) {
             // Keep the handle on failure so an explicit retry still owns cleanup.
@@ -152,7 +208,9 @@ impl Terminals {
         Ok(())
     }
 
-    fn close_owner(&self, owner: &str) -> Result<(), String> {
+    /// Revokes `owner`, then terminates all of its sessions. Unknown owners
+    /// succeed.
+    pub fn close_owner(&self, owner: &str) -> Result<(), String> {
         let mut state = self.lock()?;
         if let Some(entry) = state.owners.get_mut(owner) {
             entry.closed = true; // revoke before cleanup, even when cleanup fails
@@ -162,7 +220,9 @@ impl Terminals {
         Ok(())
     }
 
-    pub(crate) fn shutdown(&self) -> Result<(), String> {
+    /// Stops the service on app exit: refuses new owners and terminates every
+    /// session.
+    pub fn shutdown(&self) -> Result<(), String> {
         let mut state = self.lock()?;
         state.stopped = true;
         let mut result = Ok(());
@@ -201,124 +261,12 @@ fn shutdown_sessions(sessions: &mut HashMap<String, Session>) -> Result<(), Stri
     result
 }
 
-fn dimensions(cols: u16, rows: u16) -> Result<(), String> {
+/// Checks a PTY size. Callers can reject bad sizes early, before moving the
+/// request to a blocking thread.
+pub fn dimensions(cols: u16, rows: u16) -> Result<(), String> {
     if !(2..=500).contains(&cols) || !(1..=300).contains(&rows) {
         Err("Terminal dimensions must be 2–500 columns and 1–300 rows".into())
     } else {
         Ok(())
     }
-}
-
-#[tauri::command]
-pub(crate) async fn terminal_create_owner(
-    state: tauri::State<'_, Terminals>,
-) -> Result<String, String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.create_owner())
-        .await
-        .map_err(|e| e.to_string())?
-}
-#[tauri::command]
-pub(crate) async fn terminal_spawn(
-    state: tauri::State<'_, Terminals>,
-    owner: String,
-    context: TerminalContext,
-    cols: u16,
-    rows: u16,
-) -> Result<String, String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.spawn(&owner, context, cols, rows))
-        .await
-        .map_err(|e| e.to_string())?
-}
-#[tauri::command]
-pub(crate) async fn terminal_read(
-    state: tauri::State<'_, Terminals>,
-    owner: String,
-    id: String,
-) -> Result<ReadResult, String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(unix)]
-        {
-            state.with_session(&owner, &id, Session::read)
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (state, owner, id);
-            Err("Local terminals require macOS or Linux".into())
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-#[tauri::command]
-pub(crate) async fn terminal_write(
-    state: tauri::State<'_, Terminals>,
-    owner: String,
-    id: String,
-    data: String,
-) -> Result<(), String> {
-    if data.len() > MAX_PENDING_INPUT {
-        return Err("Terminal input exceeds 1 MiB".into());
-    }
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(unix)]
-        {
-            state.with_session(&owner, &id, |session| session.write(data.as_bytes()))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (state, owner, id, data);
-            Err("Local terminals require macOS or Linux".into())
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-#[tauri::command]
-pub(crate) async fn terminal_resize(
-    state: tauri::State<'_, Terminals>,
-    owner: String,
-    id: String,
-    cols: u16,
-    rows: u16,
-) -> Result<(), String> {
-    dimensions(cols, rows)?;
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(unix)]
-        {
-            state.with_session(&owner, &id, |session| session.resize(cols, rows))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = (state, owner, id);
-            Err("Local terminals require macOS or Linux".into())
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-#[tauri::command]
-pub(crate) async fn terminal_close(
-    state: tauri::State<'_, Terminals>,
-    owner: String,
-    id: String,
-) -> Result<(), String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.close(&owner, &id))
-        .await
-        .map_err(|e| e.to_string())?
-}
-#[tauri::command]
-pub(crate) async fn terminal_close_owner(
-    state: tauri::State<'_, Terminals>,
-    owner: String,
-) -> Result<(), String> {
-    let state = state.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || state.close_owner(&owner))
-        .await
-        .map_err(|e| e.to_string())?
 }
