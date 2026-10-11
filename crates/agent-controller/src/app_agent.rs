@@ -308,18 +308,26 @@ impl AppAgents {
             agents.push(agent.clone());
             Ok(())
         })?;
-        let saved = credentials.add(&id, &prepared.key).and_then(|()| {
-            agent
-                .read_key(credentials)
-                .map(drop)
-                .map_err(|_| "New agent key could not be verified".into())
-        });
+        let forget = || {
+            let _ = self.update(|agents| {
+                agents.retain(|saved| saved.pubkey != agent.pubkey);
+                Ok(())
+            });
+        };
+        // A refused save stored no key, so nothing can be lost: the identity
+        // goes even when the store refuses everything, as an unavailable one
+        // does, rather than staying behind without a key.
+        if let Err(error) = credentials.add(&id, &prepared.key) {
+            forget();
+            return Err(error);
+        }
+        let saved = agent
+            .read_key(credentials)
+            .map(drop)
+            .map_err(|_| "New agent key could not be verified".into());
         if let Err(error) = saved {
             if credentials.delete(&id, &agent.pubkey).is_ok() {
-                let _ = self.update(|agents| {
-                    agents.retain(|saved| saved.pubkey != agent.pubkey);
-                    Ok(())
-                });
+                forget();
             }
             return Err(error);
         }
