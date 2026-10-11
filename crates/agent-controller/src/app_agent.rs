@@ -452,7 +452,9 @@ impl AppAgents {
         if shared {
             return Ok((agent, prepared.key));
         }
-        let saved = credentials.add(&id, &prepared.key).and_then(|()| {
+        let added = credentials.add(&id, &prepared.key);
+        let refused = added.is_err();
+        let saved = added.and_then(|()| {
             agent
                 .read_key(credentials)
                 .map(drop)
@@ -464,7 +466,10 @@ impl AppAgents {
             if prepared.adopted && matches!(credentials.read(&id, &agent.pubkey), Ok(Some(_))) {
                 return Ok((agent, prepared.key));
             }
-            if prepared.adopted || credentials.delete(&id, &agent.pubkey).is_ok() {
+            // A refused save stored no key, so nothing can be lost: the identity
+            // goes even when the store refuses everything, as an unavailable one
+            // does, rather than staying behind without a key.
+            if refused || prepared.adopted || credentials.delete(&id, &agent.pubkey).is_ok() {
                 let _ = self.update(|agents| {
                     agents.retain(|saved| saved.pubkey != agent.pubkey);
                     Ok(())

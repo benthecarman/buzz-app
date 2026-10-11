@@ -217,6 +217,11 @@ fn a_failed_key_save_leaves_no_orphaned_key() {
     set(&credentials.1.add, true);
     assert!(commit(&credentials).is_err());
     assert!(agents.list().unwrap().is_empty());
+    // ...even when it refuses everything, as an unavailable store does.
+    set(&credentials.1.delete, true);
+    assert!(commit(&credentials).is_err());
+    assert!(agents.list().unwrap().is_empty());
+    set(&credentials.1.delete, false);
     set(&credentials.1.add, false);
     // The key is saved but cannot be read back: it is deleted with its identity.
     set(&credentials.1.read, true);
