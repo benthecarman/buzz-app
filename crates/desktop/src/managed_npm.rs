@@ -312,6 +312,22 @@ fn npm_error(log: &File, start: u64) -> Option<String> {
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
+/// The system's `tar`: `/usr/bin/tar` where it exists, else the system
+/// profile's on NixOS, which has no `/usr/bin`. A `tar` found on `PATH` is
+/// the last resort.
+fn system_tar() -> Option<PathBuf> {
+    ["/usr/bin/tar", "/bin/tar", "/run/current-system/sw/bin/tar"]
+        .into_iter()
+        .map(PathBuf::from)
+        .chain(
+            std::env::var_os("PATH")
+                .into_iter()
+                .flat_map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+                .map(|dir| dir.join("tar")),
+        )
+        .find(|tar| tar.is_file())
+}
+
 async fn install_node(
     setup: &HarnessSetup,
     app_data: &Path,
@@ -337,8 +353,15 @@ async fn install_node(
     let archive_path = stage.join("node.tar.gz");
     let result = async {
         std::fs::write(&archive_path, archive).map_err(|_| "Could not stage Node archive")?;
-        let mut tar = tokio::process::Command::new("/usr/bin/tar");
-        scrub(&mut tar, home, Path::new("/usr/bin"), app_data)?;
+        let tar_path = system_tar().ok_or("Could not find tar to unpack Node.js")?;
+        let mut tar = tokio::process::Command::new(&tar_path);
+        // Its own folder is the PATH, for the gzip `-z` runs.
+        scrub(
+            &mut tar,
+            home,
+            tar_path.parent().unwrap_or(Path::new("/usr/bin")),
+            app_data,
+        )?;
         tar.arg("-xzf")
             .arg(&archive_path)
             .arg("-C")
