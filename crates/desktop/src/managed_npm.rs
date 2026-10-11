@@ -193,12 +193,15 @@ fn scrub(
     node_bin: &Path,
     app_data: &Path,
 ) -> Result<(), String> {
+    // NixOS keeps its system tools (git, gzip) in the system profile, not
+    // under /usr; like /usr/bin it is root-owned.
     let path = std::env::join_paths([
         node_bin,
         Path::new("/usr/bin"),
         Path::new("/bin"),
         Path::new("/usr/sbin"),
         Path::new("/sbin"),
+        Path::new("/run/current-system/sw/bin"),
     ])
     .map_err(|_| "Invalid managed Node PATH")?;
     command.env_clear();
@@ -709,7 +712,7 @@ chmod 755 "$prefix/bin/$name"
         assert_eq!(
             get("PATH"),
             Some(std::ffi::OsStr::new(
-                "/managed/node/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+                "/managed/node/bin:/usr/bin:/bin:/usr/sbin:/sbin:/run/current-system/sw/bin"
             ))
         );
         assert_eq!(get("HOME"), Some(std::ffi::OsStr::new("/temporary/home")));
